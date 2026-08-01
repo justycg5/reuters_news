@@ -18,16 +18,16 @@ jobs:
   fetch-and-push:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       # 用 Actions Cache 保存上次已推送 URL 列表，实现跨运行去重。
       # key 每次不同（run_id），restore-keys 取最近一次缓存。
       - name: Restore dedup state
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: last_sent.json
           key: reuters-last-sent-${{ github.run_id }}
