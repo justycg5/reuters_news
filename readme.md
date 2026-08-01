@@ -1,0 +1,65 @@
+# Reuters 中国相关新闻 → 企业微信推送（GitHub Actions）
+
+定时抓取 **Google News RSS**（主查询 `site:reuters.com + china + 24h` + 补充主题查询 `beijing` / `taiwan` / `hong kong`，合并去重），把最近 24 小时 Reuters 关于中国的报道推送到企业微信群。
+
+> 为什么不用 reuters.com 直抓：实测其部署了 CloudFront + **DataDome 反爬**，脚本请求返回 HTTP 401；
+> Google News RSS 为标准 XML、无反爬、免费、稳定，实测 200 且来源 100% 为 Reuters。
+> 为什么多查询合并：Google News RSS 单查询最多返回 100 条且按相关性排序，24h 内 Reuters 中国报道超过 100 条时会漏报，
+> 补充主题查询可捞回主查询漏掉的条目（实测合并后 224 条 vs 单查询 100 条，过滤后 18 条 vs 14~15 条）。
+
+## 文件结构
+
+| 文件 | 用途 |
+|---|---|
+| `fetch_reuters.py` | 多查询抓取 RSS + 合并去重 + 关键词/时间过滤 + 去重 + 企业微信纯文本推送（无超链接） |
+| `.github/workflows/reuters-china-push.yml` | GitHub Actions 定时任务定义（每小时整点 UTC） |
+| `last_sent.json` | 运行期生成：已推送 URL 记录（自动创建，勿手动编辑，不入 git） |
+| `.env.local` | 本地调试配置（含完整 webhook 地址，**不入 git**）；GitHub 部署用 Secret 即可 |
+
+## 部署步骤
+
+1. **建 GitHub 仓库**，把本目录三个文件推上去。
+2. **企业微信群添加机器人**：群设置 → 群机器人 → 添加，复制 webhook 地址中 `key=` 后面的字符串。
+3. **配置 Secret**：仓库 Settings → Secrets and variables → Actions → New repository secret，名称 `WECOM_WEBHOOK_KEY`，值粘贴上一步的 key。
+4. **手动验证**：仓库 Actions 页面 → `reuters-china-push` → Run workflow，看日志确认抓取与推送成功。
+5. **确认定时生效**：默认每小时整点（UTC）自动运行；改频率编辑 yaml 里的 `cron` 行。
+
+## 本地调试
+
+```bash
+# 方式一（推荐）：创建 .env.local 文件（参考 .env.local.example），内容一行：
+#   WECOM_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=你的完整key
+# 脚本优先读取该文件，完整 key 不会出现在命令行/日志中
+
+# 方式二：环境变量
+set WECOM_WEBHOOK_KEY=你的key        # PowerShell: $env:WECOM_WEBHOOK_KEY="你的key"
+
+# 本机访问海外站点需代理（本机 7890 端口有 Clash 类代理可复用）
+pip install requests
+$env:HTTPS_PROXY="http://127.0.0.1:7890"
+python fetch_reuters.py
+```
+
+> 实测参考（2026-08-01）：走代理抓取 4 个查询（100+100+46+76 条）→ 合并去重 224 条 → 关键词/时间过滤 18 条 → 纯文本推送成功。
+
+## 修改指南
+
+| 想改什么 | 改哪里 |
+|---|---|
+| 推送频率 | yaml 的 `cron` 表达式（UTC 时区） |
+| 搜索查询（新增/删减主题） | `fetch_reuters.py` 顶部 `QUERIES` 列表（URL 编码，`site:reuters.com china when:1d`） |
+| 过滤关键词集合 | `fetch_reuters.py` 的 `KEYWORDS` 列表 |
+| 时间窗口 | `QUERIES` 各条的 `when:1d`（可选 `when:7d`、`when:1h`） |
+| 消息文案/格式 | `push_wecom()` 函数 |
+| webhook 地址 | Secret `WECOM_WEBHOOK_KEY`（或本地 `.env.local` / 环境变量 `WECOM_WEBHOOK_URL`） |
+
+## 已知限制（诚实说明）
+
+- **链接为 Google News 跳转链**：条目链接是 `news.google.com/rss/articles/...`，点击后跳转到 reuters 原文，企业微信内可正常打开（推送已不包含链接，仅内部记录用）。
+- **单查询 100 条上限**：Google News RSS 每查询最多 100 条且按相关性排序，单查询会漏报；已用多查询合并缓解，但极端情况下（单主题也超 100 条）仍可能漏。
+- **标题关键词过滤**：`KEYWORDS` 二次过滤兜底，个别条目标题不含中国关键词会被筛掉；如需更全可放宽关键词或增加查询。
+- **cron 不保证准时**：GitHub Actions 定时任务可能有数分钟~数十分钟延迟，偶发跳过。
+- **去重依赖 Actions Cache**：缓存可能被清理，清理后会出现少量重复推送，属可接受范围。
+- **消息超长自动分组**：企业微信 text 单条上限 2048 字节，条数多时脚本按字节预算自动拆分为多条发送（实测 18 条约 1372 字节、单条发送）。
+- **纯文本推送（无超链接、无 URL）**：消息类型为 text，格式为「编号. 标题」，仅推送标题纯文本，不包含链接与 URL（用户 2026-08-01 确认）。
+- **合规**：抓取频率每小时 1 次（4 个查询），对 Google News RSS 压力极小；仅用于个人/内部信息聚合。

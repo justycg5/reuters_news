@@ -1,0 +1,44 @@
+name: reuters-china-push
+
+# 触发方式:
+#   1. schedule: 每小时整点（UTC）。cron 不保证准时、偶发跳过，属正常现象。
+#      如需调整频率，改下面 cron 表达式即可（5 位, UTC 时区）。
+#      例: 每日 08:00 UTC(=北京 16:00): "0 8 * * *"
+#          每 6 小时:        "0 */6 * * *"
+#   2. workflow_dispatch: 仓库 Actions 页面可手动触发，用于调试/补推。
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  fetch-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # 用 Actions Cache 保存上次已推送 URL 列表，实现跨运行去重。
+      # key 每次不同（run_id），restore-keys 取最近一次缓存。
+      - name: Restore dedup state
+        uses: actions/cache@v4
+        with:
+          path: last_sent.json
+          key: reuters-last-sent-${{ github.run_id }}
+          restore-keys: reuters-last-sent-
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Fetch and push
+        run: python fetch_reuters.py
+        env:
+          # 在仓库 Settings → Secrets and variables → Actions 中配置:
+          #   WECOM_WEBHOOK_KEY = 企业微信群机器人的 webhook key（URL 中 key= 后那串）
+          WECOM_WEBHOOK_KEY: ${{ secrets.WECOM_WEBHOOK_KEY }}
