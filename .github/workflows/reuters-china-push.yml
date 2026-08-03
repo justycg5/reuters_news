@@ -8,7 +8,7 @@ name: reuters-china-push
 #   2. workflow_dispatch: 仓库 Actions 页面可手动触发，用于调试/补推。
 on:
   schedule:
-    - cron: "25 * * * *"
+    - cron: "16 * * * *"
   workflow_dispatch: {}
 
 permissions:
