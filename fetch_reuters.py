@@ -171,6 +171,14 @@ def keyword_hit(title: str) -> bool:
     return any(k in t for k in KEYWORDS)
 
 
+def make_header(source_groups: list) -> str:
+    """按实际出现的来源生成消息头部（单来源时只写该来源名，避免头部与内容不符）。"""
+    names = [n for n, _ in source_groups if n]
+    if not names:
+        return "Reuters / Bloomberg 中国相关（24h）\n"
+    return " / ".join(names) + " 中国相关（24h）\n"
+
+
 def push_wecom(webhook: str, source_groups: list, max_bytes: int = 1900) -> bool:
     """按字节预算分组推送纯文本（企业微信 text 单条上限 2048 字节，留安全余量）。
     source_groups: [(来源名, items)]，调用方已按来源排序、组内时间倒序。
@@ -178,7 +186,7 @@ def push_wecom(webhook: str, source_groups: list, max_bytes: int = 1900) -> bool
     时间为 Google News 收录时间，与原文发布时刻误差分钟级）；
     来源分组间插入 '— 来源名 —' 分隔行，编号全局连续。
     返回 True 当且仅当所有分组推送成功。"""
-    header = "Reuters / Bloomberg 中国相关（24h）\n"
+    header = make_header(source_groups)
     body = []
     idx = 0
     first = True
