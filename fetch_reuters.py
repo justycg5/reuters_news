@@ -18,7 +18,7 @@ fetch_reuters.py - 抓取 Google News RSS（Reuters + Bloomberg 中国相关，�
 行为:
     1. 请求 Google News RSS 多来源多查询（Reuters/Bloomberg × china/beijing/taiwan/hong kong），合并去重
     2. 解析标准 RSS XML（标题/链接/来源/发布时间）
-    3. 过滤: 标题关键词命中 + 24 小时时间校验
+    3. 过滤: 标题关键词（子串）或中国公司名（词边界）命中 + 24 小时时间校验
     4. 去重: 读取 last_sent.json，跳过已推送条目
     5. 推送: 纯文本消息 POST 企业微信 webhook；按来源分组（组间分隔行，组内时间倒序），
        字节超限自动拆多条；无新条目时推送“暂无新消息”占位消息
@@ -82,6 +82,44 @@ KEYWORDS = [
     "china", "chinese", "beijing", "hong kong", "taiwan",
     "xi jinping", "us-china", "sino-", "shanghai", "shenzhen",
 ]
+
+# 中国公司名单（词边界匹配）：美股中概 + 港股巨头 + A 股巨头 + 非上市重要公司。
+# 甄别原则: 避开强歧义词（abc=农行/ABC News、jd=京东/人名 JD Vance、poly、greenland、
+# honor=荣耀/普通词"荣誉"等）；词边界 \b 确保独立成词才命中（nio 不撞 junio、gree 不撞 Greece）。
+COMPANY_NAMES = [
+    # --- 美股中概 ---
+    "alibaba", "pinduoduo", "jd.com", "baidu", "netease", "bilibili",
+    "kuaishou", "trip.com", "nio", "xpeng", "li auto", "didi", "weibo",
+    "iqiyi", "shein", "temu", "tiktok", "bytedance", "zhihu",
+    "full truck alliance", "yum china", "autohome", "zto express",
+    # --- 港股巨头 ---
+    "tencent", "meituan", "xiaomi", "byd", "geely", "smic", "ping an",
+    "cmb", "icbc", "ccb", "boc", "lenovo", "great wall motor",
+    "nongfu spring", "country garden", "evergrande", "vanke", "sunac",
+    "citic", "cnooc", "petrochina", "sinopec", "ant group",
+    "anta", "li ning", "yili", "mengniu", "hkex", "haidilao",
+    # --- A 股巨头 ---
+    "moutai", "catl", "midea", "gree", "haier",
+    "sany", "wuliangye", "zijin", "yangtze power", "longi", "sungrow",
+    "trina", "ja solar", "gcl", "huaneng", "shenhua", "baowu", "chalco",
+    # --- 非上市巨头与重要公司 ---
+    "huawei", "oppo", "vivo", "dji", "mihoyo", "hoyoverse", "moonshot",
+    "deepseek", "zhipu", "baichuan", "minimax", "xiaohongshu", "rednote",
+    "wahaha", "state grid", "sinochem",
+    # --- 其他知名/科技/制造 ---
+    "hikvision", "zte", "wuxi", "hua hong", "yangtze memory", "cxmt",
+    "foxconn", "hon hai", "changan", "saic", "gwm", "chery", "xtep",
+]
+
+_COMPANY_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(n) for n in COMPANY_NAMES) + r")\b",
+    re.IGNORECASE,
+)
+
+
+def company_hit(title: str) -> bool:
+    """标题是否含中国公司名（词边界匹配，独立成词才命中）。"""
+    return bool(_COMPANY_RE.search(title))
 STATE_FILE = "last_sent.json"
 MAX_STATE = 200  # 状态文件保留最近条数
 
@@ -367,8 +405,10 @@ def _run() -> int:
         return 1
     print(f"Merged {len(items)} raw items (deduped)")
 
-    # 关键词 + 时间过滤
-    filtered = [it for it in items if keyword_hit(it["title"]) and within_24h(it["published"])]
+    # 关键词 + 中国公司名 + 时间过滤（关键词子串 or 公司名词边界，短路：命中即通过）
+    filtered = [it for it in items
+                if (keyword_hit(it["title"]) or company_hit(it["title"]))
+                and within_24h(it["published"])]
     print(f"After filter: {len(filtered)} items")
 
     # 去重

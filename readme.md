@@ -53,6 +53,12 @@ python fetch_reuters.py
 | 消息文案/格式 | `push_wecom()` 函数 |
 | webhook 地址 | Secret `WECOM_WEBHOOK_KEY`（或本地 `.env.local` / 环境变量 `WECOM_WEBHOOK_URL`） |
 
+## 过滤规则（2026-08-08 升级）
+
+- **关键词（子串匹配）**：标题含 china/chinese/beijing/hong kong/taiwan/xi jinping/us-china/sino-/shanghai/shenzhen 之一
+- **中国公司名（词边界匹配）**：标题含公司名单中任一名称（美股中概 + 港股巨头 + A 股巨头 + 非上市巨头 + AI 新势力，共 99 个词条；独立成词才命中，避免 nio/junio、gree/Greece、jd/人名 等撞词误报）
+- 两者为**并集**（命中任一即通过），再叠加 24 小时时间校验
+
 ## 已知限制（诚实说明）
 
 - **错误处理（2026-08-08 新增）**：单查询失败 → 附注附加在当轮消息末尾（`⚠️ 注：n/8 查询失败...，可能漏报`）；无新消息时改为失败提示；全部查询失败 / 推送失败（重试 1 次后）/ 未捕获异常 → 推送独立错误消息（⚠️ 前缀）；**key 缺失或无效时无法推送错误消息**（webhook 本身不可用），只能靠 GitHub Actions 红叉兑底。
