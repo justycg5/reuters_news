@@ -23,12 +23,22 @@ fetch_reuters.py - 抓取 Google News RSS（Reuters + Bloomberg 中国相关，�
     5. 推送: 纯文本消息 POST 企业微信 webhook；按来源分组（组间分隔行，组内时间倒序），
        字节超限自动拆多条；无新条目时推送“暂无新消息”占位消息
     6. 保存 last_sent.json（最近 200 条，供下次去重）
+
+错误处理（2026-08-08 新增）:
+    - 单查询失败: 告警跳过，失败摘要作为附注附加在当轮消息末尾（或 idle 消息内）
+    - 全部查询失败: 推送独立错误消息（⚠️ 前缀）
+    - 推送失败: 重试 1 次，仍失败则推送错误消息
+    - 未捕获异常: 推送错误消息（类型+信息，不推完整堆栈）
+    - key 缺失/无效: 无法推送（webhook 本身不可用），靠 GitHub Actions 红叉兜底
 """
 
 import json
 import os
 import re
 import sys
+import time
+import traceback
+import urllib.parse
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
@@ -87,8 +97,8 @@ HEADERS = {
 
 def webhook_url() -> str:
     # 优先级 1: 本地调试文件 .env.local（不入 git，手动创建），格式:
-    #   WECOM_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx
-    # 或 WECOM_WEBHOOK_KEY=xxx
+    #   WECOM_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=***
+    # 或 WECOM_WEBHOOK_KEY=***
     try:
         with open(".env.local", encoding="utf-8") as f:
             for raw in f:
@@ -179,12 +189,13 @@ def make_header(source_groups: list) -> str:
     return " / ".join(names) + " 中国相关（24h）\n"
 
 
-def push_wecom(webhook: str, source_groups: list, max_bytes: int = 1900) -> bool:
+def push_wecom(webhook: str, source_groups: list, max_bytes: int = 1900, note: str = None) -> bool:
     """按字节预算分组推送纯文本（企业微信 text 单条上限 2048 字节，留安全余量）。
     source_groups: [(来源名, items)]，调用方已按来源排序、组内时间倒序。
     格式: 编号. [MM-DD HH:mm 北京时间] 标题（纯文本，无超链接、无 URL；
     时间为 Google News 收录时间，与原文发布时刻误差分钟级）；
     来源分组间插入 '— 来源名 —' 分隔行，编号全局连续。
+    note: 部分查询失败的附注（有内容时附加在消息末尾）。
     返回 True 当且仅当所有分组推送成功。"""
     header = make_header(source_groups)
     body = []
@@ -199,6 +210,8 @@ def push_wecom(webhook: str, source_groups: list, max_bytes: int = 1900) -> bool
         for it in src_items:
             idx += 1
             body.append(f"{idx}. [{fmt_time(it['published'])}] {it['title']}\n")
+    if note:
+        body.append(f"\n⚠️ 注：{note}，可能漏报\n")
 
     groups, cur, cur_len = [], [], 0
     for line in body:
@@ -229,9 +242,13 @@ def push_wecom(webhook: str, source_groups: list, max_bytes: int = 1900) -> bool
     return ok
 
 
-def push_idle(webhook: str) -> bool:
-    """无新条目时发送占位消息（纯文本）。"""
-    payload = {"msgtype": "text", "text": {"content": "Reuters / Bloomberg 中国相关（24h）\n暂无新消息"}}
+def push_idle(webhook: str, note: str = None) -> bool:
+    """无新条目时发送占位消息（纯文本）；有部分失败时改为失败提示。"""
+    if note:
+        content = f"Reuters / Bloomberg 中国相关（24h）\n⚠️ {note}，暂无新消息或存在漏报"
+    else:
+        content = "Reuters / Bloomberg 中国相关（24h）\n暂无新消息"
+    payload = {"msgtype": "text", "text": {"content": content}}
     try:
         r = requests.post(webhook, json=payload, timeout=15)
         data = r.json()
@@ -244,10 +261,49 @@ def push_idle(webhook: str) -> bool:
     return True
 
 
-def fetch_all() -> list:
+def push_error(webhook: str, err_type: str, detail: str) -> bool:
+    """推送独立错误消息（⚠️ 前缀纯文本），用于全部失败/推送失败/未捕获异常。"""
+    content = f"⚠️ {err_type}\n\n{detail}"
+    payload = {"msgtype": "text", "text": {"content": content}}
+    print(f"Pushing error notice ({len(content.encode('utf-8'))} bytes)")
+    try:
+        r = requests.post(webhook, json=payload, timeout=15)
+        data = r.json()
+    except Exception as e:
+        print(f"ERROR: error-notice push failed: {e}")
+        return False
+    if data.get("errcode") != 0:
+        print(f"ERROR: webhook errcode={data.get('errcode')} errmsg={data.get('errmsg')}")
+        return False
+    return True
+
+
+def push_with_retry(webhook: str, source_groups: list, note: str = None) -> bool:
+    """推送失败重试 1 次（间隔 3 秒），缓解偶发网络抖动。"""
+    if push_wecom(webhook, source_groups, note=note):
+        return True
+    print("push failed, retrying once after 3s...")
+    time.sleep(3)
+    return push_wecom(webhook, source_groups, note=note)
+
+
+def fail_summary(failures: list, total: int) -> str:
+    """生成失败查询摘要（含来源与主题，最多列 4 个）。"""
+    fcnt = len(failures)
+    parts = []
+    for src, q, _ in failures[:4]:
+        m = re.search(r"[?&]q=([^&]+)", q)
+        topic = urllib.parse.unquote(m.group(1))[:36] if m else "?"
+        parts.append(f"{src} {topic}")
+    tail = f" 等{fcnt}个" if fcnt > 4 else ""
+    return f"{fcnt}/{total} 查询失败：{'、'.join(parts)}{tail}"
+
+
+def fetch_all() -> tuple:
     """拉取全部来源×查询并合并去重（URL 去重 + 标题兜底去重），条目打 source 来源标签。
-    单个查询失败仅告警跳过。"""
+    返回 (items, failures)：failures 为 [(来源名, 查询URL, 异常摘要), ...]，单个查询失败仅告警跳过。"""
     seen_url, seen_title, merged = set(), set(), []
+    failures = []
     for src, queries in SOURCES.items():
         for q in queries:
             print(f"Fetching [{src}] {q}")
@@ -255,12 +311,16 @@ def fetch_all() -> list:
                 resp = requests.get(q, headers=HEADERS, timeout=30)
                 resp.raise_for_status()
             except requests.RequestException as e:
-                print(f"WARN: fetch failed: {e}")
+                msg = f"{type(e).__name__}: {str(e)[:120]}"
+                print(f"WARN: fetch failed: {msg}")
+                failures.append((src, q, msg))
                 continue
             try:
                 items = parse_rss(resp.text)
             except ET.ParseError as e:
-                print(f"WARN: RSS parse failed: {e}")
+                msg = f"ParseError: {e}"
+                print(f"WARN: RSS parse failed: {msg}")
+                failures.append((src, q, msg))
                 continue
             print(f"  -> {len(items)} items")
             for it in items:
@@ -272,7 +332,7 @@ def fetch_all() -> list:
                 seen_title.add(k_title)
                 it["source"] = src
                 merged.append(it)
-    return merged
+    return merged, failures
 
 
 def load_state() -> list:
@@ -291,10 +351,19 @@ def save_state(urls) -> None:
         json.dump(urls[-MAX_STATE:], f, ensure_ascii=False)
 
 
-def main() -> int:
-    items = fetch_all()
+def _run() -> int:
+    total_queries = sum(len(v) for v in SOURCES.values())
+    items, failures = fetch_all()
+    note = fail_summary(failures, total_queries) if failures else None
+    if failures:
+        print(f"WARN: {note}")
+
     if not items:
         print("FATAL: all queries failed")
+        detail = ("全部查询失败（数据源或网络故障）:\n"
+                  + "\n".join(f"- [{s}] {m}" for s, _, m in failures[:8])
+                  + "\n建议: 查看 GitHub Actions 日志")
+        push_error(webhook_url(), "Reuters / Bloomberg 推送任务异常", detail)
         return 1
     print(f"Merged {len(items)} raw items (deduped)")
 
@@ -309,7 +378,7 @@ def main() -> int:
 
     if not fresh:
         print("No new items, send idle notice")
-        return 0 if push_idle(webhook_url()) else 1
+        return 0 if push_idle(webhook_url(), note=note) else 1
 
     # 按来源分组（保持 SOURCES 固定顺序），组内时间倒序（最新在前）
     source_groups = []
@@ -319,12 +388,28 @@ def main() -> int:
             sub.sort(key=lambda it: parse_dt(it["published"]), reverse=True)
             source_groups.append((src, sub))
 
-    if not push_wecom(webhook_url(), source_groups):
+    if not push_with_retry(webhook_url(), source_groups, note=note):
+        push_error(webhook_url(), "Reuters / Bloomberg 推送任务异常",
+                   "推送失败（重试 1 次后仍失败）\n建议: 查看 GitHub Actions 日志确认 webhook 状态")
         return 1
 
     save_state(old | {it["url"] for it in fresh})
     print(f"Pushed {len(fresh)} items to WeCom, state saved")
     return 0
+
+
+def main() -> int:
+    try:
+        return _run()
+    except Exception as e:
+        tb = traceback.format_exc()
+        print(f"UNCAUGHT ERROR:\n{tb}")
+        detail = f"未预期异常: {type(e).__name__}: {e}\n建议: 查看 GitHub Actions 日志"
+        try:
+            push_error(webhook_url(), "Reuters / Bloomberg 推送任务异常", detail)
+        except Exception:
+            pass
+        return 1
 
 
 if __name__ == "__main__":
