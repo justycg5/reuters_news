@@ -1,11 +1,11 @@
-# Reuters 中国相关新闻 → 企业微信推送（GitHub Actions）
+# Reuters + Bloomberg 中国相关新闻 → 企业微信推送（GitHub Actions）
 
-定时抓取 **Google News RSS**（主查询 `site:reuters.com + china + 24h` + 补充主题查询 `beijing` / `taiwan` / `hong kong`，合并去重），把最近 24 小时 Reuters 关于中国的报道推送到企业微信群。
+定时抓取 **Google News RSS**（Reuters / Bloomberg 两个来源 × 主查询 + 补充主题查询 `beijing` / `taiwan` / `hong kong`，合并去重），把最近 24 小时两大财经媒体关于中国的报道推送到企业微信群。
 
-> 为什么不用 reuters.com 直抓：实测其部署了 CloudFront + **DataDome 反爬**，脚本请求返回 HTTP 401；
-> Google News RSS 为标准 XML、无反爬、免费、稳定，实测 200 且来源 100% 为 Reuters。
-> 为什么多查询合并：Google News RSS 单查询最多返回 100 条且按相关性排序，24h 内 Reuters 中国报道超过 100 条时会漏报，
-> 补充主题查询可捞回主查询漏掉的条目（实测合并后 224 条 vs 单查询 100 条，过滤后 18 条 vs 14~15 条）。
+> 为什么不用官网直抓：实测 reuters.com 部署 CloudFront + **DataDome 反爬**（HTTP 401）、bloomberg.com 反爬（HTTP **403**），脚本直抓均不可行；
+> Google News RSS 为标准 XML、无反爬、免费、稳定，实测 200，Reuters 来源 100%、Bloomberg 来源 93%+（Bloomberg.com + Bloomberg LEI）。
+> 为什么多查询合并：Google News RSS 单查询最多返回 100 条且按相关性排序，24h 内相关报道超过 100 条时会漏报，
+> 补充主题查询可捞回主查询漏掉的条目（实测 8 查询合并 369 条 vs 单查询 100 条，过滤后 42 条）。
 
 ## 文件结构
 
@@ -40,16 +40,16 @@ $env:HTTPS_PROXY="http://127.0.0.1:7890"
 python fetch_reuters.py
 ```
 
-> 实测参考（2026-08-01）：走代理抓取 4 个查询（100+100+46+76 条）→ 合并去重 224 条 → 关键词/时间过滤 18 条 → 纯文本推送成功。
+> 实测参考（2026-08-08，双源版）：走代理抓取 8 个查询（Reuters 4 + Bloomberg 4）→ 合并去重 369 条 → 关键词/时间过滤 42 条 → 按来源分组纯文本推送成功（2 条消息：20+23）。
 
 ## 修改指南
 
 | 想改什么 | 改哪里 |
 |---|---|
 | 推送频率 | yaml 的 `cron` 表达式（UTC 时区） |
-| 搜索查询（新增/删减主题） | `fetch_reuters.py` 顶部 `QUERIES` 列表（URL 编码，`site:reuters.com china when:1d`） |
+| 搜索查询（新增/删减来源或主题） | `fetch_reuters.py` 顶部 `SOURCES` dict（来源名 → 查询列表，URL 编码，`site:reuters.com china when:1d`；dict 顺序即推送分组顺序） |
 | 过滤关键词集合 | `fetch_reuters.py` 的 `KEYWORDS` 列表 |
-| 时间窗口 | `QUERIES` 各条的 `when:1d`（可选 `when:7d`、`when:1h`） |
+| 时间窗口 | 各查询的 `when:1d`（可选 `when:7d`、`when:1h`） |
 | 消息文案/格式 | `push_wecom()` 函数 |
 | webhook 地址 | Secret `WECOM_WEBHOOK_KEY`（或本地 `.env.local` / 环境变量 `WECOM_WEBHOOK_URL`） |
 
@@ -60,6 +60,7 @@ python fetch_reuters.py
 - **标题关键词过滤**：`KEYWORDS` 二次过滤兜底，个别条目标题不含中国关键词会被筛掉；如需更全可放宽关键词或增加查询。
 - **cron 不保证准时**：GitHub Actions 定时任务可能有数分钟~数十分钟延迟，偶发跳过。
 - **去重依赖 Actions Cache**：缓存可能被清理，清理后会出现少量重复推送，属可接受范围。
-- **消息超长自动分组**：企业微信 text 单条上限 2048 字节，条数多时脚本按字节预算自动拆分为多条发送（实测 18 条约 1372 字节、单条发送）。
-- **纯文本推送（无超链接、无 URL）**：消息类型为 text，格式为「编号. 标题」，仅推送标题纯文本，不包含链接与 URL（用户 2026-08-01 确认）。
-- **合规**：抓取频率每小时 1 次（4 个查询），对 Google News RSS 压力极小；仅用于个人/内部信息聚合。
+- **消息超长自动分组**：企业微信 text 单条上限 2048 字节，条数多时脚本按字节预算自动拆分为多条发送（实测带时间 22 条 → 2 条消息：20+2）。
+- **纯文本推送（无超链接、无 URL）**：消息类型为 text，格式为「编号. [MM-DD HH:mm] 标题」，按来源分组（组间 `— Bloomberg —` 分隔行，组内时间倒序最新在前）；仅推送标题纯文本，不包含链接与 URL（用户 2026-08-01 确认，2026-08-08 扩展双源分组）。
+- **时间说明**：`[MM-DD HH:mm]` 为**北京时间**，来自 RSS 的 pubDate——即 **Google News 收录时间**，与原文发布时刻误差分钟级（Reuters 官网 DataDome 反爬、Bloomberg 官网 403，均拿不到原文精确时间戳）。
+- **合规**：抓取频率每小时 1 次（8 个查询），对 Google News RSS 压力极小；仅用于个人/内部信息聚合。

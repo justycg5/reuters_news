@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-fetch_reuters.py - 抓取 Google News RSS（Reuters 中国相关，最近 24h）并推送到企业微信群机器人
+fetch_reuters.py - 抓取 Google News RSS（Reuters + Bloomberg 中国相关，最近 24h）并推送企业微信群机器人
 
-数据源: Google News RSS（聚合 Reuters 文章，无反爬、免费、稳定）
-  https://news.google.com/rss/search?q=site:reuters.com+china+when:1d&hl=en-US&gl=US&ceid=US:en
+数据源: Google News RSS（聚合 Reuters / Bloomberg 文章，无反爬、免费、稳定）
+  主查询: site:reuters.com china when:1d + site:bloomberg.com china when:1d
 
-为什么不用 reuters.com 直抓:
-  reuters.com 部署了 CloudFront + DataDome 反爬，脚本请求返回 HTTP 401，
-  直抓不可行；Google News RSS 为标准 XML，实测 200、100% Reuters 来源。
+为什么不用官网直抓:
+  reuters.com 有 CloudFront + DataDome（HTTP 401）；bloomberg.com 反爬（HTTP 403）。
+  直抓均不可行；Google News RSS 为标准 XML，实测 200，来源 93%+ 为对应媒体。
 
 运行环境: GitHub Actions (ubuntu-latest)，或本机（需能访问海外站点/挂代理）
 
@@ -16,12 +16,12 @@ fetch_reuters.py - 抓取 Google News RSS（Reuters 中国相关，最近 24h）
     本机走代理:  curl -x http://127.0.0.1:7890 ... 或设置 HTTPS_PROXY 环境变量
 
 行为:
-    1. 请求 Google News RSS 主查询 + 补充主题查询（beijing/taiwan/hong kong），合并去重
+    1. 请求 Google News RSS 多来源多查询（Reuters/Bloomberg × china/beijing/taiwan/hong kong），合并去重
     2. 解析标准 RSS XML（标题/链接/来源/发布时间）
     3. 过滤: 标题关键词命中 + 24 小时时间校验
     4. 去重: 读取 last_sent.json，跳过已推送条目
-    5. 推送: 组装 markdown 消息 POST 企业微信 webhook；有新条目时分组推送，
-       无新条目时推送“暂无新消息”占位消息
+    5. 推送: 纯文本消息 POST 企业微信 webhook；按来源分组（组间分隔行，组内时间倒序），
+       字节超限自动拆多条；无新条目时推送“暂无新消息”占位消息
     6. 保存 last_sent.json（最近 200 条，供下次去重）
 """
 
@@ -30,27 +30,44 @@ import os
 import re
 import sys
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
 
 import requests
 
-# 主查询 + 补充主题查询（Google News RSS 单查询最多 100 条且按相关性排序，
-# 24h 内 Reuters 中国报道超 100 条时会漏，故用多查询合并提升覆盖）。
-QUERIES = [
-    "https://news.google.com/rss/search"
-    "?q=site%3Areuters.com%20china%20when%3A1d"
-    "&hl=en-US&gl=US&ceid=US:en",
-    "https://news.google.com/rss/search"
-    "?q=site%3Areuters.com%20beijing%20when%3A1d"
-    "&hl=en-US&gl=US&ceid=US:en",
-    "https://news.google.com/rss/search"
-    "?q=site%3Areuters.com%20taiwan%20when%3A1d"
-    "&hl=en-US&gl=US&ceid=US:en",
-    "https://news.google.com/rss/search"
-    "?q=site%3Areuters.com%20%22hong%20kong%22%20when%3A1d"
-    "&hl=en-US&gl=US&ceid=US:en",
-]
+# 多来源 × 多主题查询（Google News RSS 单查询最多 100 条且按相关性排序，
+# 24h 内相关报道超 100 条时会漏，故多查询合并提升覆盖）。
+# dict 顺序即推送分组顺序（Reuters 在前，Bloomberg 在后）。
+SOURCES = {
+    "Reuters": [
+        "https://news.google.com/rss/search"
+        "?q=site%3Areuters.com%20china%20when%3A1d"
+        "&hl=en-US&gl=US&ceid=US:en",
+        "https://news.google.com/rss/search"
+        "?q=site%3Areuters.com%20beijing%20when%3A1d"
+        "&hl=en-US&gl=US&ceid=US:en",
+        "https://news.google.com/rss/search"
+        "?q=site%3Areuters.com%20taiwan%20when%3A1d"
+        "&hl=en-US&gl=US&ceid=US:en",
+        "https://news.google.com/rss/search"
+        "?q=site%3Areuters.com%20%22hong%20kong%22%20when%3A1d"
+        "&hl=en-US&gl=US&ceid=US:en",
+    ],
+    "Bloomberg": [
+        "https://news.google.com/rss/search"
+        "?q=site%3Abloomberg.com%20china%20when%3A1d"
+        "&hl=en-US&gl=US&ceid=US:en",
+        "https://news.google.com/rss/search"
+        "?q=site%3Abloomberg.com%20beijing%20when%3A1d"
+        "&hl=en-US&gl=US&ceid=US:en",
+        "https://news.google.com/rss/search"
+        "?q=site%3Abloomberg.com%20taiwan%20when%3A1d"
+        "&hl=en-US&gl=US&ceid=US:en",
+        "https://news.google.com/rss/search"
+        "?q=site%3Abloomberg.com%20%22hong%20kong%22%20when%3A1d"
+        "&hl=en-US&gl=US&ceid=US:en",
+    ],
+}
 KEYWORDS = [
     "china", "chinese", "beijing", "hong kong", "taiwan",
     "xi jinping", "us-china", "sino-", "shanghai", "shenzhen",
@@ -95,8 +112,8 @@ def webhook_url() -> str:
 
 
 def strip_source(title: str) -> str:
-    """清理 Google News 标题自带的 ' - Reuters' 来源后缀。"""
-    return re.sub(r"\s*-\s*Reuters\s*$", "", title).strip()
+    """清理 Google News 标题自带的来源后缀（Reuters / Bloomberg.com / Bloomberg LEI）。"""
+    return re.sub(r"\s*-\s*(?:Reuters(?: poll)?|Bloomberg(?:\.com| LEI)?)\s*$", "", title).strip()
 
 
 def parse_rss(text: str) -> list:
@@ -128,19 +145,55 @@ def within_24h(pub: str) -> bool:
     return age.total_seconds() <= 24 * 3600 + 300  # 5 分钟容差
 
 
+def parse_dt(pub: str):
+    """解析 pubDate 为带时区的 datetime；失败返回最小时间（排序时垫底）。"""
+    try:
+        dt = parsedate_to_datetime(pub)
+    except Exception:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def fmt_time(pub: str) -> str:
+    """GMT -> 北京时间 MM-DD HH:mm（24h 窗口跨天，带日期）；解析失败返回 '??'。"""
+    if not pub:
+        return "??"
+    dt = parse_dt(pub)
+    if dt == datetime.min.replace(tzinfo=timezone.utc):
+        return "??"
+    return dt.astimezone(timezone(timedelta(hours=8))).strftime("%m-%d %H:%M")
+
+
 def keyword_hit(title: str) -> bool:
     t = title.lower()
     return any(k in t for k in KEYWORDS)
 
 
-def push_wecom(webhook: str, items: list, max_bytes: int = 1900) -> bool:
+def push_wecom(webhook: str, source_groups: list, max_bytes: int = 1900) -> bool:
     """按字节预算分组推送纯文本（企业微信 text 单条上限 2048 字节，留安全余量）。
-    格式: 编号. 标题（纯文本，无超链接、无 URL）。
+    source_groups: [(来源名, items)]，调用方已按来源排序、组内时间倒序。
+    格式: 编号. [MM-DD HH:mm 北京时间] 标题（纯文本，无超链接、无 URL；
+    时间为 Google News 收录时间，与原文发布时刻误差分钟级）；
+    来源分组间插入 '— 来源名 —' 分隔行，编号全局连续。
     返回 True 当且仅当所有分组推送成功。"""
-    header = "Reuters 中国相关（24h）\n"
+    header = "Reuters / Bloomberg 中国相关（24h）\n"
+    body = []
+    idx = 0
+    first = True
+    for src_name, src_items in source_groups:
+        if not src_items:
+            continue
+        if not first:
+            body.append(f"— {src_name} —\n")
+        first = False
+        for it in src_items:
+            idx += 1
+            body.append(f"{idx}. [{fmt_time(it['published'])}] {it['title']}\n")
+
     groups, cur, cur_len = [], [], 0
-    for i, it in enumerate(items, 1):
-        line = f"{i}. {it['title']}\n"
+    for line in body:
         size = len(line.encode("utf-8"))
         if cur and cur_len + size > max_bytes:
             groups.append(cur)
@@ -170,7 +223,7 @@ def push_wecom(webhook: str, items: list, max_bytes: int = 1900) -> bool:
 
 def push_idle(webhook: str) -> bool:
     """无新条目时发送占位消息（纯文本）。"""
-    payload = {"msgtype": "text", "text": {"content": "Reuters 中国相关（24h）\n暂无新消息"}}
+    payload = {"msgtype": "text", "text": {"content": "Reuters / Bloomberg 中国相关（24h）\n暂无新消息"}}
     try:
         r = requests.post(webhook, json=payload, timeout=15)
         data = r.json()
@@ -184,30 +237,33 @@ def push_idle(webhook: str) -> bool:
 
 
 def fetch_all() -> list:
-    """拉取全部查询并合并去重（URL 去重 + 标题兜底去重）。单个查询失败仅告警跳过。"""
+    """拉取全部来源×查询并合并去重（URL 去重 + 标题兜底去重），条目打 source 来源标签。
+    单个查询失败仅告警跳过。"""
     seen_url, seen_title, merged = set(), set(), []
-    for q in QUERIES:
-        print(f"Fetching {q}")
-        try:
-            resp = requests.get(q, headers=HEADERS, timeout=30)
-            resp.raise_for_status()
-        except requests.RequestException as e:
-            print(f"WARN: fetch failed: {e}")
-            continue
-        try:
-            items = parse_rss(resp.text)
-        except ET.ParseError as e:
-            print(f"WARN: RSS parse failed: {e}")
-            continue
-        print(f"  -> {len(items)} items")
-        for it in items:
-            k_url = it["url"]
-            k_title = it["title"].lower().strip()
-            if k_url in seen_url or k_title in seen_title:
+    for src, queries in SOURCES.items():
+        for q in queries:
+            print(f"Fetching [{src}] {q}")
+            try:
+                resp = requests.get(q, headers=HEADERS, timeout=30)
+                resp.raise_for_status()
+            except requests.RequestException as e:
+                print(f"WARN: fetch failed: {e}")
                 continue
-            seen_url.add(k_url)
-            seen_title.add(k_title)
-            merged.append(it)
+            try:
+                items = parse_rss(resp.text)
+            except ET.ParseError as e:
+                print(f"WARN: RSS parse failed: {e}")
+                continue
+            print(f"  -> {len(items)} items")
+            for it in items:
+                k_url = it["url"]
+                k_title = it["title"].lower().strip()
+                if k_url in seen_url or k_title in seen_title:
+                    continue
+                seen_url.add(k_url)
+                seen_title.add(k_title)
+                it["source"] = src
+                merged.append(it)
     return merged
 
 
@@ -247,7 +303,15 @@ def main() -> int:
         print("No new items, send idle notice")
         return 0 if push_idle(webhook_url()) else 1
 
-    if not push_wecom(webhook_url(), fresh):
+    # 按来源分组（保持 SOURCES 固定顺序），组内时间倒序（最新在前）
+    source_groups = []
+    for src in SOURCES:
+        sub = [it for it in fresh if it["source"] == src]
+        if sub:
+            sub.sort(key=lambda it: parse_dt(it["published"]), reverse=True)
+            source_groups.append((src, sub))
+
+    if not push_wecom(webhook_url(), source_groups):
         return 1
 
     save_state(old | {it["url"] for it in fresh})
