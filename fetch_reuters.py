@@ -24,9 +24,9 @@ fetch_reuters.py - 抓取 Google News RSS（Reuters + Bloomberg 中国相关，�
        字节超限自动拆多条；无新条目时推送“暂无新消息”占位消息
     6. 保存 last_sent.json（最近 200 条，供下次去重）
 
-错误处理（2026-08-08 新增）:
-    - 单查询失败: 告警跳过，失败摘要作为附注附加在当轮消息末尾（或 idle 消息内）
-    - 全部查询失败: 推送独立错误消息（⚠️ 前缀）
+错误处理（2026-08-08 新增，2026-08-09 加重试）:
+    - 单查询失败: 告警跳过，**自动重试 1 次（间隔 5 秒）**；重试后仍失败的摘要作为附注附加在当轮消息末尾（或 idle 消息内）
+    - 全部查询失败（重试后仍失败）: 推送独立错误消息（⚠️ 前缀）
     - 推送失败: 重试 1 次，仍失败则推送错误消息
     - 未捕获异常: 推送错误消息（类型+信息，不推完整堆栈）
     - key 缺失/无效: 无法推送（webhook 本身不可用），靠 GitHub Actions 红叉兜底
@@ -337,39 +337,52 @@ def fail_summary(failures: list, total: int) -> str:
     return f"{fcnt}/{total} 查询失败：{'、'.join(parts)}{tail}"
 
 
+def _fetch_query(src: str, q: str, seen_url: set, seen_title: set, merged: list, failures: list) -> None:
+    """拉取单个查询并合并去重；失败记录到 failures（调用方决定是否重试）。"""
+    print(f"Fetching [{src}] {q}")
+    try:
+        resp = requests.get(q, headers=HEADERS, timeout=30)
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        msg = f"{type(e).__name__}: {str(e)[:120]}"
+        print(f"WARN: fetch failed: {msg}")
+        failures.append((src, q, msg))
+        return
+    try:
+        items = parse_rss(resp.text)
+    except ET.ParseError as e:
+        msg = f"ParseError: {e}"
+        print(f"WARN: RSS parse failed: {msg}")
+        failures.append((src, q, msg))
+        return
+    print(f"  -> {len(items)} items")
+    for it in items:
+        k_url = it["url"]
+        k_title = it["title"].lower().strip()
+        if k_url in seen_url or k_title in seen_title:
+            continue
+        seen_url.add(k_url)
+        seen_title.add(k_title)
+        it["source"] = src
+        merged.append(it)
+
+
 def fetch_all() -> tuple:
     """拉取全部来源×查询并合并去重（URL 去重 + 标题兜底去重），条目打 source 来源标签。
-    返回 (items, failures)：failures 为 [(来源名, 查询URL, 异常摘要), ...]，单个查询失败仅告警跳过。"""
+    返回 (items, failures)：failures 为 [(来源名, 查询URL, 异常摘要), ...]。
+    失败查询自动重试 1 次（间隔 5 秒），缓解 Google News 对云 IP 段瞬时风控（503）导致的假失败。"""
     seen_url, seen_title, merged = set(), set(), []
     failures = []
     for src, queries in SOURCES.items():
         for q in queries:
-            print(f"Fetching [{src}] {q}")
-            try:
-                resp = requests.get(q, headers=HEADERS, timeout=30)
-                resp.raise_for_status()
-            except requests.RequestException as e:
-                msg = f"{type(e).__name__}: {str(e)[:120]}"
-                print(f"WARN: fetch failed: {msg}")
-                failures.append((src, q, msg))
-                continue
-            try:
-                items = parse_rss(resp.text)
-            except ET.ParseError as e:
-                msg = f"ParseError: {e}"
-                print(f"WARN: RSS parse failed: {msg}")
-                failures.append((src, q, msg))
-                continue
-            print(f"  -> {len(items)} items")
-            for it in items:
-                k_url = it["url"]
-                k_title = it["title"].lower().strip()
-                if k_url in seen_url or k_title in seen_title:
-                    continue
-                seen_url.add(k_url)
-                seen_title.add(k_title)
-                it["source"] = src
-                merged.append(it)
+            _fetch_query(src, q, seen_url, seen_title, merged, failures)
+    if failures:
+        print(f"Retrying {len(failures)} failed query(ies) once after 5s...")
+        time.sleep(5)
+        retried = []
+        for src, q, _ in failures:
+            _fetch_query(src, q, seen_url, seen_title, merged, retried)
+        failures = retried
     return merged, failures
 
 
