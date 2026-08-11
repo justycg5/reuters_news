@@ -157,6 +157,24 @@ HEADERS = {
 }
 
 
+def _build_webhook_url(v: str) -> str:
+    """把 Secret/环境变量值规范化为完整 webhook URL：兼容三种填法。
+    1) 完整 URL: https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx
+    2) 带前缀:   key=xxx
+    3) 裸 key:   xxx
+    """
+    v = (v or "").strip()
+    if not v:
+        return ""
+    if v.startswith("http://") or v.startswith("https://"):
+        return v
+    if v.startswith("key="):
+        v = v[4:].strip()
+    if not v:
+        return ""
+    return "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=" + v
+
+
 def webhook_url(strict: bool = True) -> str:
     """正式 webhook。strict=False 时（引擎预览模式）找不到 key 返回空串而非退出，
     便于本地只验证预览通道。"""
@@ -171,7 +189,7 @@ def webhook_url(strict: bool = True) -> str:
                     return line.split("=", 1)[1].strip()
                 if line.startswith("WECOM_WEBHOOK_KEY="):
                     k = line.split("=", 1)[1].strip()
-                    return "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=" + k
+                    return _build_webhook_url(k)
     except OSError:
         pass
     # 优先级 2/3: 环境变量（GitHub Actions 用 WECOM_WEBHOOK_KEY）
@@ -184,7 +202,7 @@ def webhook_url(strict: bool = True) -> str:
             print("FATAL: WECOM_WEBHOOK_KEY (or WECOM_WEBHOOK_URL, or .env.local) not set", file=sys.stderr)
             sys.exit(2)
         return ""
-    return "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=" + key
+    return _build_webhook_url(key)
 
 
 def webhook_url_test() -> str:
@@ -193,7 +211,7 @@ def webhook_url_test() -> str:
     找不到返回空串（预览通道跳过，不影响正式链）。"""
     key = os.environ.get("WECOM_WEBHOOK_KEY_TEST", "").strip()
     if key:
-        return "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=" + key
+        return _build_webhook_url(key)
     try:
         with open(".env.local.test", encoding="utf-8") as f:
             for raw in f:
@@ -201,7 +219,7 @@ def webhook_url_test() -> str:
                 if line.startswith("WECOM_WEBHOOK_KEY="):
                     k = line.split("=", 1)[1].strip()
                     if k:
-                        return "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=" + k
+                        return _build_webhook_url(k)
     except OSError:
         pass
     return ""
@@ -273,7 +291,10 @@ def make_header(source_groups: list, stats: dict = None) -> str:
     names = [n for n, _ in source_groups if n]
     base = (" / ".join(names) if names else "Reuters / Bloomberg") + " 中国相关（24h）\n"
     if stats:
-        base += f"（引擎过滤: Tier1 {stats['tier1']} 条 / Tier2 {stats['tier2']} 条）\n"
+        base += f"（引擎过滤: Tier1 {stats['tier1']} 条 / Tier2 {stats['tier2']} 条"
+        if stats.get("new_count") is not None:
+            base += f"，本次新增 {stats['new_count']} 条"
+        base += "）\n"
     return base
 
 
@@ -498,6 +519,10 @@ def preview_push(items: list, note: str = None) -> bool:
         print("Engine preview: no new items, skip push")
         return True
 
+    # 头部统计口径：过滤总量（Tier1/2）+ 本次去重后新增条数
+    stats2 = dict(stats)
+    stats2["new_count"] = len(fresh)
+
     source_groups = []
     for src in SOURCES:
         sub = [it for it in fresh if it["source"] == src]
@@ -505,7 +530,7 @@ def preview_push(items: list, note: str = None) -> bool:
             sub.sort(key=lambda it: parse_dt(it["published"]), reverse=True)
             source_groups.append((src, sub))
 
-    if not push_with_retry(webhook, source_groups, note=note, stats=stats):
+    if not push_with_retry(webhook, source_groups, note=note, stats=stats2):
         print("WARN: engine-preview push failed (retried once); formal chain unaffected")
         return False
     save_state(old | {it["url"] for it in fresh}, STATE_FILE_ENGINE)
