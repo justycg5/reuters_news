@@ -1,0 +1,10 @@
+{
+  "_note": "黑名单：命中的标题直接删除（drop）。只删娱乐体育等噪音，宏观词绝不在此列（走组合/例外逻辑）。",
+  "words": [
+    "sports", "football", "soccer", "basketball", "tennis", "baseball",
+    "golf", "olympics", "cricket", "rugby",
+    "movie", "movies", "celebrity", "entertainment",
+    "tv show", "television", "netflix series", "music album",
+    "fashion week", "cannes", "oscar", "grammy"
+  ]
+}

@@ -33,6 +33,7 @@ fetch_reuters.py - 抓取 Google News RSS（Reuters + Bloomberg 中国相关，�
 """
 
 import json
+import argparse
 import os
 import re
 import sys
@@ -120,8 +121,31 @@ _COMPANY_RE = re.compile(
 def company_hit(title: str) -> bool:
     """标题是否含中国公司名（词边界匹配，独立成词才命中）。"""
     return bool(_COMPANY_RE.search(title))
-STATE_FILE = "last_sent.json"
+STATE_FILE = "last_sent.json"  # 正式链去重状态（原有）
+STATE_FILE_ENGINE = "last_sent_engine.json"  # 引擎预览链去重状态（独立，测试群验证用）
 MAX_STATE = 200  # 状态文件保留最近条数
+DUMP_DIR = "data"  # --dump 原始数据落盘目录（jsonl，按天分文件）
+
+# ---- 预过滤引擎（Phase 3：默认启用；--legacy 一键回退布尔过滤） ----
+# 引擎部署在仓库 prefilter/ 子目录（与开发版 news-investment-terminal/prefilter 同步，改后需复制）
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(_BASE_DIR, "prefilter"))
+_PREFILTER_OK = False
+_PREFILTER_CFG = None
+_PREFILTER_CALIB = None
+try:
+    import prefilter_engine as pe
+    _PREFILTER_CFG = pe.load_configs(os.path.join(_BASE_DIR, "prefilter"))
+    _calib_path = os.path.join(_BASE_DIR, "prefilter", "calib.json")
+    if os.path.exists(_calib_path):
+        with open(_calib_path, encoding="utf-8") as _f:
+            _PREFILTER_CALIB = json.load(_f)
+    _PREFILTER_OK = True
+    print("Prefilter engine loaded (thresholds: tier1=%s tier2=%s)"
+          % (_PREFILTER_CALIB["tier1"] if _PREFILTER_CALIB else "dynamic",
+             _PREFILTER_CALIB["tier2"] if _PREFILTER_CALIB else "dynamic"))
+except Exception as e:
+    print(f"WARN: prefilter engine load failed ({e}); fall back to legacy boolean filter")
 
 HEADERS = {
     "User-Agent": (
@@ -133,7 +157,9 @@ HEADERS = {
 }
 
 
-def webhook_url() -> str:
+def webhook_url(strict: bool = True) -> str:
+    """正式 webhook。strict=False 时（引擎预览模式）找不到 key 返回空串而非退出，
+    便于本地只验证预览通道。"""
     # 优先级 1: 本地调试文件 .env.local（不入 git，手动创建），格式:
     #   WECOM_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=***
     # 或 WECOM_WEBHOOK_KEY=***
@@ -154,9 +180,31 @@ def webhook_url() -> str:
     if full:
         return full
     if not key:
-        print("FATAL: WECOM_WEBHOOK_KEY (or WECOM_WEBHOOK_URL, or .env.local) not set", file=sys.stderr)
-        sys.exit(2)
+        if strict:
+            print("FATAL: WECOM_WEBHOOK_KEY (or WECOM_WEBHOOK_URL, or .env.local) not set", file=sys.stderr)
+            sys.exit(2)
+        return ""
     return "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=" + key
+
+
+def webhook_url_test() -> str:
+    """测试 webhook（引擎预览验证通道，--engine-preview 用）。
+    优先级：环境变量 WECOM_WEBHOOK_KEY_TEST（GitHub Actions Secret）> .env.local.test（本地）。
+    找不到返回空串（预览通道跳过，不影响正式链）。"""
+    key = os.environ.get("WECOM_WEBHOOK_KEY_TEST", "").strip()
+    if key:
+        return "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=" + key
+    try:
+        with open(".env.local.test", encoding="utf-8") as f:
+            for raw in f:
+                line = raw.strip()
+                if line.startswith("WECOM_WEBHOOK_KEY="):
+                    k = line.split("=", 1)[1].strip()
+                    if k:
+                        return "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=" + k
+    except OSError:
+        pass
+    return ""
 
 
 def strip_source(title: str) -> str:
@@ -219,15 +267,17 @@ def keyword_hit(title: str) -> bool:
     return any(k in t for k in KEYWORDS)
 
 
-def make_header(source_groups: list) -> str:
-    """按实际出现的来源生成消息头部（单来源时只写该来源名，避免头部与内容不符）。"""
+def make_header(source_groups: list, stats: dict = None) -> str:
+    """按实际出现的来源生成消息头部（单来源时只写该来源名，避免头部与内容不符）；
+    stats 非空时附加引擎过滤统计行（Tier1/Tier2 条数）。"""
     names = [n for n, _ in source_groups if n]
-    if not names:
-        return "Reuters / Bloomberg 中国相关（24h）\n"
-    return " / ".join(names) + " 中国相关（24h）\n"
+    base = (" / ".join(names) if names else "Reuters / Bloomberg") + " 中国相关（24h）\n"
+    if stats:
+        base += f"（引擎过滤: Tier1 {stats['tier1']} 条 / Tier2 {stats['tier2']} 条）\n"
+    return base
 
 
-def push_wecom(webhook: str, source_groups: list, max_bytes: int = 1900, note: str = None) -> bool:
+def push_wecom(webhook: str, source_groups: list, max_bytes: int = 1900, note: str = None, stats: dict = None) -> bool:
     """按字节预算分组推送纯文本（企业微信 text 单条上限 2048 字节，留安全余量）。
     source_groups: [(来源名, items)]，调用方已按来源排序、组内时间倒序。
     格式: 编号. [MM-DD HH:mm 北京时间] 标题（纯文本，无超链接、无 URL；
@@ -235,7 +285,7 @@ def push_wecom(webhook: str, source_groups: list, max_bytes: int = 1900, note: s
     来源分组间插入 '— 来源名 —' 分隔行，编号全局连续。
     note: 部分查询失败的附注（有内容时附加在消息末尾）。
     返回 True 当且仅当所有分组推送成功。"""
-    header = make_header(source_groups)
+    header = make_header(source_groups, stats)
     body = []
     idx = 0
     first = True
@@ -316,13 +366,13 @@ def push_error(webhook: str, err_type: str, detail: str) -> bool:
     return True
 
 
-def push_with_retry(webhook: str, source_groups: list, note: str = None) -> bool:
+def push_with_retry(webhook: str, source_groups: list, note: str = None, stats: dict = None) -> bool:
     """推送失败重试 1 次（间隔 3 秒），缓解偶发网络抖动。"""
-    if push_wecom(webhook, source_groups, note=note):
+    if push_wecom(webhook, source_groups, note=note, stats=stats):
         return True
     print("push failed, retrying once after 3s...")
     time.sleep(3)
-    return push_wecom(webhook, source_groups, note=note)
+    return push_wecom(webhook, source_groups, note=note, stats=stats)
 
 
 def fail_summary(failures: list, total: int) -> str:
@@ -386,23 +436,120 @@ def fetch_all() -> tuple:
     return merged, failures
 
 
-def load_state() -> list:
-    if os.path.exists(STATE_FILE):
+def load_state(path: str = STATE_FILE) -> list:
+    if os.path.exists(path):
         try:
-            with open(STATE_FILE, encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             return []
     return []
 
 
-def save_state(urls) -> None:
+def save_state(urls, path: str = STATE_FILE) -> None:
     urls = list(urls)
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(urls[-MAX_STATE:], f, ensure_ascii=False)
 
 
-def _run() -> int:
+def engine_filter(items: list, thresholds: dict = None) -> tuple:
+    """预过滤引擎评分过滤：返回 (filtered, stats, results_by_title)。
+    filtered 为 Tier1+2 且非黑名单的条目（已附加 tier/assets/engine_score 标签）；
+    results_by_title 为全量评分结果（供 dump 落盘）；thresholds 为固化阈值（None 时当批分位数）。"""
+    results = pe.score_all([{"title": it["title"]} for it in items],
+                           _PREFILTER_CFG, thresholds=thresholds)
+    push_res = pe.filter_for_push(results, (1, 2))
+    push_titles = {r["title"] for r in push_res}
+    filtered = []
+    for it, r in zip(items, results):
+        if it["title"] in push_titles:
+            it["tier"] = r["tier"]
+            it["assets"] = r["assets"]
+            it["engine_score"] = r["score"]
+            filtered.append(it)
+    stats = {
+        "tier1": sum(1 for r in push_res if r["tier"] == 1),
+        "tier2": sum(1 for r in push_res if r["tier"] == 2),
+        "blacklisted": sum(1 for r in results if r["blacklisted"]),
+    }
+    return filtered, stats, {r["title"]: r for r in results}
+
+
+def preview_push(items: list, note: str = None) -> bool:
+    """引擎预览验证通道：引擎过滤结果推送到测试 webhook（独立状态 last_sent_engine.json）。
+    与正式链完全隔离（独立去重/独立状态），失败只 WARN 不影响正式链退出码。
+    无测试 key / 引擎未加载 / 无新条时静默跳过（不推 idle，避免刷屏测试群）。"""
+    webhook = webhook_url_test()
+    if not webhook:
+        print("WARN: engine-preview skipped: no test webhook key "
+              "(set WECOM_WEBHOOK_KEY_TEST or .env.local.test)")
+        return True
+    if not _PREFILTER_OK:
+        print("WARN: engine-preview skipped: prefilter engine load failed")
+        return True
+
+    fresh_items = [it for it in items if within_24h(it["published"])]
+    filtered, stats, _ = engine_filter(fresh_items, _PREFILTER_CALIB)
+    old = set(load_state(STATE_FILE_ENGINE))
+    fresh = [it for it in filtered if it["url"] not in old]
+    print(f"Engine preview: {len(filtered)} filtered, {len(fresh)} new for test group "
+          f"(tier1={stats['tier1']}, tier2={stats['tier2']})")
+    if not fresh:
+        print("Engine preview: no new items, skip push")
+        return True
+
+    source_groups = []
+    for src in SOURCES:
+        sub = [it for it in fresh if it["source"] == src]
+        if sub:
+            sub.sort(key=lambda it: parse_dt(it["published"]), reverse=True)
+            source_groups.append((src, sub))
+
+    if not push_with_retry(webhook, source_groups, note=note, stats=stats):
+        print("WARN: engine-preview push failed (retried once); formal chain unaffected")
+        return False
+    save_state(old | {it["url"] for it in fresh}, STATE_FILE_ENGINE)
+    print(f"Engine preview: pushed {len(fresh)} items to test webhook, state saved")
+    return True
+
+
+def dump_items(items: list, results: dict = None) -> None:
+    """把当批原始条目（含未过滤的）追加落盘到 data/dump-YYYY-MM-DD.jsonl。
+    每条含过滤标记（keyword_hit / company_hit / within_24h / passed），
+    供 Phase 2 阈值校准与评估使用。results（引擎评分 title->result）非空时附加引擎字段。
+    按北京时间日期分文件，重复运行追加。"""
+    os.makedirs(DUMP_DIR, exist_ok=True)
+    day = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
+    path = os.path.join(DUMP_DIR, f"dump-{day}.jsonl")
+    ts = datetime.now(timezone.utc).isoformat()
+    n = 0
+    with open(path, "a", encoding="utf-8") as f:
+        for it in items:
+            kw = keyword_hit(it["title"])
+            co = company_hit(it["title"])
+            win = within_24h(it["published"])
+            rec = {
+                "ts": ts,
+                "source": it["source"],
+                "title": it["title"],
+                "url": it["url"],
+                "published": it["published"],
+                "keyword_hit": kw,
+                "company_hit": co,
+                "within_24h": win,
+                "passed": (kw or co) and win,
+            }
+            if results is not None:
+                r = results.get(it["title"])
+                rec["engine_score"] = r["score"] if r else None
+                rec["tier"] = r["tier"] if r else None
+                rec["assets"] = r["assets"] if r else []
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            n += 1
+    print(f"Dumped {n} items to {path}")
+
+
+def _run(dump: bool = False, dump_only: bool = False, engine_preview: bool = False) -> int:
     total_queries = sum(len(v) for v in SOURCES.values())
     items, failures = fetch_all()
     note = fail_summary(failures, total_queries) if failures else None
@@ -418,20 +565,44 @@ def _run() -> int:
         return 1
     print(f"Merged {len(items)} raw items (deduped)")
 
-    # 关键词 + 中国公司名 + 时间过滤（关键词子串 or 公司名词边界，短路：命中即通过）
+    # 主链（原有链条不动）：布尔过滤 = 关键词子串 or 公司名词边界 + 24h
     filtered = [it for it in items
                 if (keyword_hit(it["title"]) or company_hit(it["title"]))
                 and within_24h(it["published"])]
     print(f"After filter: {len(filtered)} items")
+
+    if dump or dump_only:
+        # dump 落盘：引擎可用时附带评分字段（供校准/评估，不改变主链行为）
+        engine_results = None
+        if _PREFILTER_OK:
+            fresh_all = [it for it in items if within_24h(it["published"])]
+            engine_results = {r["title"]: r for r in
+                              pe.score_all([{"title": it["title"]} for it in fresh_all],
+                                           _PREFILTER_CFG, thresholds=_PREFILTER_CALIB)}
+        dump_items(items, results=engine_results)
+    if dump_only:
+        print(f"Dump-only mode: {len(items)} raw, {len(filtered)} would pass filter; no push")
+        return 0
 
     # 去重
     old = set(load_state())
     fresh = [it for it in filtered if it["url"] not in old]
     print(f"New items: {len(fresh)}")
 
+    # 正式 webhook：preview 模式下允许缺失（本地只验预览通道时跳过正式链）
+    main_webhook = webhook_url(strict=not engine_preview)
+    if not main_webhook:
+        print("WARN: no formal webhook key; skip formal chain push (engine-preview mode)")
+        if engine_preview:
+            preview_push(items, note=note)
+        return 0
+
     if not fresh:
         print("No new items, send idle notice")
-        return 0 if push_idle(webhook_url(), note=note) else 1
+        ok = push_idle(main_webhook, note=note)
+        if engine_preview:
+            preview_push(items, note=note)
+        return 0 if ok else 1
 
     # 按来源分组（保持 SOURCES 固定顺序），组内时间倒序（最新在前）
     source_groups = []
@@ -441,19 +612,32 @@ def _run() -> int:
             sub.sort(key=lambda it: parse_dt(it["published"]), reverse=True)
             source_groups.append((src, sub))
 
-    if not push_with_retry(webhook_url(), source_groups, note=note):
-        push_error(webhook_url(), "Reuters / Bloomberg 推送任务异常",
+    if not push_with_retry(main_webhook, source_groups, note=note):
+        push_error(main_webhook, "Reuters / Bloomberg 推送任务异常",
                    "推送失败（重试 1 次后仍失败）\n建议: 查看 GitHub Actions 日志确认 webhook 状态")
         return 1
 
     save_state(old | {it["url"] for it in fresh})
     print(f"Pushed {len(fresh)} items to WeCom, state saved")
+
+    # 引擎预览验证通道（可选）：引擎过滤结果推测试 webhook，与正式链完全隔离
+    if engine_preview:
+        preview_push(items, note=note)
+
     return 0
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Reuters/Bloomberg 中国相关新闻抓取推送")
+    parser.add_argument("--dump", action="store_true",
+                        help="正常流程外，额外把原始条目落盘到 data/（jsonl，按天分文件）")
+    parser.add_argument("--dump-only", action="store_true",
+                        help="只抓取 + 落盘，不推送（本机采集数据用，供阈值校准）")
+    parser.add_argument("--engine-preview", action="store_true",
+                        help="并行验证：正式链维持布尔过滤推正式群，另将引擎过滤结果推测试群（独立去重）")
+    args = parser.parse_args()
     try:
-        return _run()
+        return _run(dump=args.dump, dump_only=args.dump_only, engine_preview=args.engine_preview)
     except Exception as e:
         tb = traceback.format_exc()
         print(f"UNCAUGHT ERROR:\n{tb}")

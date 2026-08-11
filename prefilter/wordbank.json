@@ -1,0 +1,271 @@
+{
+  "_note": "分级词库。匹配方式：词边界 + 简易词干（sanctions→sanction）。同词出现在多层时只计最高权重。权重语义：3=实体词 8=主题/公司 9=利率 10=关键政策/央行实体。",
+  "layers": {
+    "china_entity": {
+      "weight": 3,
+      "words": [
+        "china",
+        "chinese",
+        "beijing",
+        "shanghai",
+        "shenzhen",
+        "hong kong",
+        "taiwan",
+        "macau",
+        "pboc",
+        "xi jinping"
+      ]
+    },
+    "china_policy": {
+      "weight": 8,
+      "words": [
+        "stimulus",
+        "policy support",
+        "regulation",
+        "property policy",
+        "economic meeting",
+        "currency",
+        "rate cut",
+        "economy",
+        "economic",
+        "gdp",
+        "pmi",
+        "exports",
+        "imports",
+        "retail sales",
+        "industrial output",
+        "trade data",
+        "politburo"
+      ]
+    },
+    "china_currency": {
+      "weight": 12,
+      "words": [
+        "yuan",
+        "renminbi"
+      ]
+    },
+    "china_conflict": {
+      "weight": 15,
+      "words": [
+        "tariff",
+        "trade war",
+        "export control",
+        "sanction",
+        "sanctions",
+        "blacklist",
+        "entity list",
+        "decoupling",
+        "us-china",
+        "sino-",
+        "trade",
+        "retaliation",
+        "countermeasure"
+      ]
+    },
+    "fed_entity": {
+      "weight": 10,
+      "words": [
+        "federal reserve",
+        "fed",
+        "powell",
+        "fomc"
+      ]
+    },
+    "fed_rate": {
+      "weight": 9,
+      "words": [
+        "rate cut",
+        "rate hike",
+        "interest rate",
+        "policy rate"
+      ]
+    },
+    "fed_inflation": {
+      "weight": 10,
+      "words": [
+        "cpi",
+        "pce",
+        "inflation",
+        "payroll",
+        "jobs",
+        "unemployment"
+      ]
+    },
+    "tech": {
+      "weight": 8,
+      "words": [
+        "nvidia",
+        "gpu",
+        "ai chip",
+        "semiconductor",
+        "tsmc",
+        "asml",
+        "openai",
+        "microsoft",
+        "google",
+        "amazon",
+        "apple",
+        "meta"
+      ]
+    },
+    "gold": {
+      "weight": 12,
+      "words": [
+        "gold",
+        "war",
+        "conflict",
+        "geopolitical",
+        "central bank gold",
+        "safe haven",
+        "dollar",
+        "real yield"
+      ]
+    },
+    "commodity": {
+      "weight": 8,
+      "words": [
+        "oil",
+        "crude",
+        "brent",
+        "wti",
+        "opec",
+        "gas",
+        "energy"
+      ]
+    },
+    "companies": {
+      "weight": 8,
+      "words": [
+        "alibaba",
+        "pinduoduo",
+        "jd.com",
+        "baidu",
+        "netease",
+        "bilibili",
+        "kuaishou",
+        "trip.com",
+        "nio",
+        "xpeng",
+        "li auto",
+        "didi",
+        "weibo",
+        "iqiyi",
+        "shein",
+        "temu",
+        "tiktok",
+        "bytedance",
+        "zhihu",
+        "full truck alliance",
+        "yum china",
+        "autohome",
+        "zto express",
+        "tencent",
+        "meituan",
+        "xiaomi",
+        "byd",
+        "geely",
+        "smic",
+        "ping an",
+        "cmb",
+        "icbc",
+        "ccb",
+        "boc",
+        "lenovo",
+        "great wall motor",
+        "nongfu spring",
+        "country garden",
+        "evergrande",
+        "vanke",
+        "sunac",
+        "citic",
+        "cnooc",
+        "petrochina",
+        "sinopec",
+        "ant group",
+        "anta",
+        "li ning",
+        "yili",
+        "mengniu",
+        "hkex",
+        "haidilao",
+        "moutai",
+        "catl",
+        "midea",
+        "gree",
+        "haier",
+        "sany",
+        "wuliangye",
+        "zijin",
+        "yangtze power",
+        "longi",
+        "sungrow",
+        "trina",
+        "ja solar",
+        "gcl",
+        "huaneng",
+        "shenhua",
+        "baowu",
+        "chalco",
+        "huawei",
+        "oppo",
+        "vivo",
+        "dji",
+        "mihoyo",
+        "hoyoverse",
+        "moonshot",
+        "deepseek",
+        "zhipu",
+        "baichuan",
+        "minimax",
+        "xiaohongshu",
+        "rednote",
+        "wahaha",
+        "state grid",
+        "sinochem",
+        "hikvision",
+        "zte",
+        "wuxi",
+        "hua hong",
+        "yangtze memory",
+        "cxmt",
+        "foxconn",
+        "hon hai",
+        "changan",
+        "saic",
+        "gwm",
+        "chery",
+        "xtep"
+      ]
+    },
+    "tech_general": {
+      "weight": 5,
+      "words": [
+        "tech",
+        "technology",
+        "ai",
+        "artificial intelligence",
+        "chip",
+        "chips",
+        "semiconductors"
+      ]
+    },
+    "aerospace": {
+      "weight": 5,
+      "words": [
+        "rocket",
+        "launch",
+        "satellite",
+        "spacecraft",
+        "aerospace",
+        "aviation",
+        "airline",
+        "airlines",
+        "missile",
+        "lunar",
+        "orbit",
+        "space station"
+      ]
+    }
+  }
+}

@@ -25,20 +25,28 @@ jobs:
           python-version: "3.12"
 
       # 用 Actions Cache 保存上次已推送 URL 列表，实现跨运行去重。
+      # 两个状态文件：last_sent.json（正式链）+ last_sent_engine.json（引擎预览链，独立）。
       # key 每次不同（run_id），restore-keys 取最近一次缓存。
       - name: Restore dedup state
         uses: actions/cache@v5
         with:
-          path: last_sent.json
+          path: |
+            last_sent.json
+            last_sent_engine.json
           key: reuters-last-sent-${{ github.run_id }}
           restore-keys: reuters-last-sent-
 
       - name: Install dependencies
         run: pip install requests
 
+      # --engine-preview: 正式链维持布尔过滤推正式群（原有链条不动），
+      # 另将引擎过滤结果推测试群（WECOM_WEBHOOK_KEY_TEST），独立去重，用于并行验证。
+      # 验证期结束后去掉 --engine-preview 即恢复纯正式推送。
       - name: Fetch and push
-        run: python fetch_reuters.py
+        run: python fetch_reuters.py --engine-preview
         env:
           # 在仓库 Settings → Secrets and variables → Actions 中配置:
-          #   WECOM_WEBHOOK_KEY = 企业微信群机器人的 webhook key（URL 中 key= 后那串）
+          #   WECOM_WEBHOOK_KEY = 正式群 webhook key（URL 中 key= 后那串）
+          #   WECOM_WEBHOOK_KEY_TEST = 测试群 webhook key（引擎预览验证通道）
           WECOM_WEBHOOK_KEY: ${{ secrets.WECOM_WEBHOOK_KEY }}
+          WECOM_WEBHOOK_KEY_TEST: ${{ secrets.WECOM_WEBHOOK_KEY_TEST }}

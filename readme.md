@@ -11,9 +11,11 @@
 
 | 文件 | 用途 |
 |---|---|
-| `fetch_reuters.py` | 多查询抓取 RSS + 合并去重 + 关键词/时间过滤 + 去重 + 企业微信纯文本推送（无超链接） |
-| `.github/workflows/reuters-china-push.yml` | GitHub Actions 定时任务定义（每小时整点 UTC） |
-| `last_sent.json` | 运行期生成：已推送 URL 记录（自动创建，勿手动编辑，不入 git） |
+| `fetch_reuters.py` | 多查询抓取 RSS + 合并去重 + 正式链（布尔过滤）推正式群 + 可选引擎预览链（`--engine-preview`，推测试群）+ 去重 + 企业微信纯文本推送（无超链接） |
+| `prefilter/` | 预过滤引擎部署副本（`prefilter_engine.py` + 配置 JSON + `calib.json` 固化阈值）；与开发版 `news-investment-terminal/prefilter` 同步，改后需复制 |
+| `.github/workflows/reuters-china-push.yml` | GitHub Actions 定时任务定义（每小时整点 UTC，当前带 `--engine-preview` 并行验证） |
+| `last_sent.json` | 运行期生成：正式链已推送 URL 记录（自动创建，勿手动编辑，不入 git） |
+| `last_sent_engine.json` | 运行期生成：引擎预览链已推送 URL 记录（独立去重，不入 git） |
 | `.env.local` | 本地调试配置（含完整 webhook 地址，**不入 git**）；GitHub 部署用 Secret 即可 |
 
 ## 部署步骤
@@ -53,11 +55,35 @@ python fetch_reuters.py
 | 消息文案/格式 | `push_wecom()` 函数 |
 | webhook 地址 | Secret `WECOM_WEBHOOK_KEY`（或本地 `.env.local` / 环境变量 `WECOM_WEBHOOK_URL`） |
 
-## 过滤规则（2026-08-08 升级）
+## 过滤规则（2026-08-08 升级；2026-08-11 引擎预览验证模式）
 
-- **关键词（子串匹配）**：标题含 china/chinese/beijing/hong kong/taiwan/xi jinping/us-china/sino-/shanghai/shenzhen 之一
-- **中国公司名（词边界匹配）**：标题含公司名单中任一名称（美股中概 + 港股巨头 + A 股巨头 + 非上市巨头 + AI 新势力，共 99 个词条；独立成词才命中，避免 nio/junio、gree/Greece、jd/人名 等撞词误报）
+**正式链（默认，原有链条不动）：布尔过滤**
+- 关键词（子串匹配）：标题含 china/chinese/beijing/hong kong/taiwan/xi jinping/us-china/sino-/shanghai/shenzhen 之一
+- 中国公司名（词边界匹配）：公司名单 99 词条（独立成词才命中，避免 nio/junio、gree/Greece、jd/人名 撞词误报）
 - 两者为**并集**（命中任一即通过），再叠加 24 小时时间校验
+
+**引擎预览链（`--engine-preview`，推测试群）：预过滤引擎评分制**
+- 词库评分（12 层：中国实体/政策/冲突、Fed/利率/通胀就业、科技/泛科技、黄金、原油、公司名、航天航空）+ 组合加分（23 条规则：AI芯片限制/Fed降息/中美贸易/台海/油价异动/就业报告/中国科技指数/中国航天航空等）+ BM25 主题文档相关度（9 个文档，含 aerospace），z-score 归一化后 0.6/0.4 融合
+- Tier 分层（固化阈值 `prefilter/calib.json`：tier1 ≥ 2.887 / tier2 ≥ 0.76），推送 **Tier1+2**，黑名单（娱乐体育）剔除
+- 推送头部附统计行：`（引擎过滤: Tier1 N 条 / Tier2 N 条）`
+- **与正式链完全隔离**：独立去重状态 `last_sent_engine.json`、独立 webhook（测试群 key `WECOM_WEBHOOK_KEY_TEST`），失败不影响正式链；回放 golden 召回 55/59（93%，剩余 4 漏均 golden 误标/边缘）
+- 验证期结束满意后：改 workflow 为 `python fetch_reuters.py`（去掉 `--engine-preview`）即正式切换；不满意则维持现状（正式链始终布尔）
+
+## 用法
+
+```bash
+# 正常推送（正式链：布尔过滤 → 正式群；GitHub Actions 自动执行，本机需可访问 Google News 或设 HTTPS_PROXY）
+python fetch_reuters.py
+
+# 引擎预览验证（正式链照旧推正式群，另将引擎过滤结果推测试群，独立去重）
+python fetch_reuters.py --engine-preview
+
+# 额外把原始抓取条目（含未过滤的）落盘到 data/dump-YYYY-MM-DD.jsonl（供阈值校准/评估）
+python fetch_reuters.py --dump
+
+# 只抓取 + 落盘，不推送（Phase 0 本机定时采集用）
+python fetch_reuters.py --dump-only
+```
 
 ## 已知限制（诚实说明）
 

@@ -1,0 +1,567 @@
+{
+  "_note": "组合加分规则：terms 为 list of list，每个内层 list 是可选词组（任一命中即该 term 命中）；所有 term 都命中才加分。词组匹配为无序共现（'rate cut' 也能命中 'cuts rates'）。assets 为组合命中时声明的资产标签（并入条目资产）。",
+  "rules": [
+    {
+      "name": "中美贸易",
+      "terms": [
+        [
+          "china",
+          "chinese"
+        ],
+        [
+          "tariff",
+          "trade war",
+          "trade"
+        ]
+      ],
+      "bonus": 20,
+      "assets": [
+        "A股"
+      ]
+    },
+    {
+      "name": "AI芯片限制",
+      "terms": [
+        [
+          "china",
+          "chinese"
+        ],
+        [
+          "chip",
+          "semiconductor"
+        ],
+        [
+          "export",
+          "ban",
+          "restrict",
+          "control",
+          "curb",
+          "limit"
+        ]
+      ],
+      "bonus": 30,
+      "assets": [
+        "A股",
+        "纳指"
+      ]
+    },
+    {
+      "name": "芯片出口管制",
+      "terms": [
+        [
+          "chip",
+          "semiconductor",
+          "nvidia",
+          "tsmc"
+        ],
+        [
+          "restrict",
+          "ban",
+          "control",
+          "curb",
+          "export"
+        ]
+      ],
+      "bonus": 25,
+      "assets": [
+        "纳指",
+        "A股"
+      ]
+    },
+    {
+      "name": "Fed降息",
+      "terms": [
+        [
+          "fed",
+          "federal reserve",
+          "fomc",
+          "powell"
+        ],
+        [
+          "rate cut",
+          "ease",
+          "easing",
+          "loosen"
+        ]
+      ],
+      "bonus": 20,
+      "assets": [
+        "纳指",
+        "标普",
+        "黄金"
+      ]
+    },
+    {
+      "name": "Fed加息",
+      "terms": [
+        [
+          "fed",
+          "federal reserve",
+          "fomc",
+          "powell"
+        ],
+        [
+          "rate hike",
+          "tighten",
+          "tightening",
+          "hike"
+        ]
+      ],
+      "bonus": 20,
+      "assets": [
+        "纳指",
+        "标普"
+      ]
+    },
+    {
+      "name": "Fed与通胀数据",
+      "terms": [
+        [
+          "fed",
+          "federal reserve",
+          "fomc"
+        ],
+        [
+          "inflation",
+          "cpi",
+          "pce"
+        ]
+      ],
+      "bonus": 15,
+      "assets": [
+        "标普",
+        "纳指"
+      ]
+    },
+    {
+      "name": "Fed与就业数据",
+      "terms": [
+        [
+          "fed",
+          "federal reserve",
+          "fomc"
+        ],
+        [
+          "payroll",
+          "jobs",
+          "unemployment",
+          "labor"
+        ]
+      ],
+      "bonus": 15,
+      "assets": [
+        "标普",
+        "纳指"
+      ]
+    },
+    {
+      "name": "就业报告",
+      "terms": [
+        [
+          "jobs",
+          "payroll",
+          "unemployment"
+        ],
+        [
+          "report",
+          "data",
+          "rate",
+          "figures"
+        ]
+      ],
+      "bonus": 20,
+      "assets": [
+        "标普",
+        "纳指"
+      ]
+    },
+    {
+      "name": "黄金避险",
+      "terms": [
+        [
+          "gold"
+        ],
+        [
+          "safe haven",
+          "haven",
+          "flight to"
+        ]
+      ],
+      "bonus": 15,
+      "assets": [
+        "黄金"
+      ]
+    },
+    {
+      "name": "金价走势",
+      "terms": [
+        [
+          "gold"
+        ],
+        [
+          "rally",
+          "surge",
+          "record",
+          "climb",
+          "gain",
+          "high",
+          "slip",
+          "fall",
+          "drop",
+          "jump",
+          "touch"
+        ]
+      ],
+      "bonus": 15,
+      "assets": [
+        "黄金"
+      ]
+    },
+    {
+      "name": "央行购金",
+      "terms": [
+        [
+          "gold"
+        ],
+        [
+          "reserve",
+          "central bank",
+          "buy",
+          "purchase",
+          "hoard"
+        ]
+      ],
+      "bonus": 15,
+      "assets": [
+        "黄金"
+      ]
+    },
+    {
+      "name": "地缘推金价",
+      "terms": [
+        [
+          "gold"
+        ],
+        [
+          "conflict",
+          "war",
+          "geopolitical",
+          "escalat"
+        ]
+      ],
+      "bonus": 15,
+      "assets": [
+        "黄金"
+      ]
+    },
+    {
+      "name": "地缘冲突",
+      "terms": [
+        [
+          "iran",
+          "israel",
+          "gulf",
+          "middle east",
+          "ukraine",
+          "russia",
+          "korea"
+        ],
+        [
+          "strike",
+          "attack",
+          "escalat",
+          "threaten",
+          "war",
+          "missile",
+          "invasion"
+        ]
+      ],
+      "bonus": 20,
+      "assets": [
+        "黄金"
+      ]
+    },
+    {
+      "name": "油价异动",
+      "terms": [
+        [
+          "oil",
+          "crude",
+          "brent",
+          "wti"
+        ],
+        [
+          "surge",
+          "plunge",
+          "spike",
+          "slump",
+          "jump",
+          "slide",
+          "war",
+          "soar",
+          "sink"
+        ]
+      ],
+      "bonus": 20,
+      "assets": [
+        "A股",
+        "标普"
+      ]
+    },
+    {
+      "name": "地缘石油",
+      "terms": [
+        [
+          "oil",
+          "crude",
+          "brent",
+          "wti"
+        ],
+        [
+          "iran",
+          "sanction",
+          "strike",
+          "war",
+          "gulf",
+          "middle east",
+          "russia",
+          "opec"
+        ]
+      ],
+      "bonus": 15,
+      "assets": [
+        "A股",
+        "标普",
+        "黄金"
+      ]
+    },
+    {
+      "name": "芯片股异动",
+      "terms": [
+        [
+          "chip",
+          "semiconductor",
+          "tsmc",
+          "nvidia",
+          "asml",
+          "smic"
+        ],
+        [
+          "selloff",
+          "fall",
+          "drop",
+          "slump",
+          "plunge",
+          "dip",
+          "decline",
+          "tumble"
+        ]
+      ],
+      "bonus": 15,
+      "assets": [
+        "纳指",
+        "A股"
+      ]
+    },
+    {
+      "name": "中国政治",
+      "terms": [
+        [
+          "china",
+          "chinese",
+          "beijing"
+        ],
+        [
+          "politburo",
+          "purge",
+          "anti-graft",
+          "party congress",
+          "leadership",
+          "probe"
+        ]
+      ],
+      "bonus": 15,
+      "assets": [
+        "A股"
+      ]
+    },
+    {
+      "name": "台海局势",
+      "terms": [
+        [
+          "taiwan",
+          "taiwanese"
+        ],
+        [
+          "military",
+          "drill",
+          "strait",
+          "army",
+          "navy",
+          "exercise",
+          "threat",
+          "war"
+        ]
+      ],
+      "bonus": 25,
+      "assets": [
+        "A股",
+        "黄金"
+      ]
+    },
+    {
+      "name": "中国刺激",
+      "terms": [
+        [
+          "china",
+          "chinese",
+          "beijing"
+        ],
+        [
+          "stimulus",
+          "stimulate",
+          "inject",
+          "easing"
+        ]
+      ],
+      "bonus": 20,
+      "assets": [
+        "A股"
+      ]
+    },
+    {
+      "name": "中国经济数据",
+      "terms": [
+        [
+          "china",
+          "chinese"
+        ],
+        [
+          "export",
+          "gdp",
+          "pmi",
+          "growth",
+          "import",
+          "data",
+          "industrial",
+          "output"
+        ]
+      ],
+      "bonus": 15,
+      "assets": [
+        "A股"
+      ]
+    },
+    {
+      "name": "人民币异动",
+      "terms": [
+        [
+          "yuan",
+          "renminbi"
+        ],
+        [
+          "calm",
+          "fall",
+          "fell",
+          "weak",
+          "weaken",
+          "strong",
+          "strengthen",
+          "pressure",
+          "gain",
+          "slide",
+          "slip",
+          "slump",
+          "surge",
+          "depreciat",
+          "appreciat"
+        ]
+      ],
+      "bonus": 15,
+      "assets": [
+        "A股",
+        "黄金"
+      ]
+    },
+    {
+      "name": "中国降息",
+      "terms": [
+        [
+          "china",
+          "chinese",
+          "pboc"
+        ],
+        [
+          "rate cut",
+          "easing",
+          "loan prime rate"
+        ]
+      ],
+      "bonus": 20,
+      "assets": [
+        "A股"
+      ]
+    },
+    {
+      "terms": [
+        [
+          "china",
+          "chinese",
+          "hong kong",
+          "beijing",
+          "shanghai",
+          "shenzhen",
+          "taiwan",
+          "beijing"
+        ],
+        [
+          "tech",
+          "technology",
+          "ai",
+          "chip",
+          "semiconductor",
+          "index",
+          "stocks",
+          "market"
+        ]
+      ],
+      "bonus": 15,
+      "assets": [
+        "A股",
+        "纳指"
+      ],
+      "name": "china_tech_index"
+    },
+    {
+      "name": "中国航天航空",
+      "bonus": 15,
+      "terms": [
+        [
+          "china",
+          "chinese",
+          "beijing",
+          "hong kong",
+          "taiwan",
+          "shanghai",
+          "shenzhen"
+        ],
+        [
+          "rocket",
+          "launch",
+          "satellite",
+          "spacecraft",
+          "aerospace",
+          "aviation",
+          "airline",
+          "airlines",
+          "missile",
+          "lunar",
+          "orbit"
+        ]
+      ],
+      "assets": [
+        "A股"
+      ]
+    }
+  ]
+}
