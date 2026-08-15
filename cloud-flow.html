@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>云端全链路流程图：数据源 → 企业微信群</title>
+<style>
+  :root {
+    --bg: #f6f7fb; --card: #fff; --ink: #1f2430; --muted: #6b7280;
+    --line: #e5e7eb; --blue: #2563eb; --green: #059669; --amber: #d97706;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    background: var(--bg); color: var(--ink); line-height: 1.7;
+    padding: 32px 16px;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; }
+  header.hero {
+    background: linear-gradient(135deg, #1e3a8a, #2563eb);
+    color: #fff; border-radius: var(--radius); padding: 28px; margin-bottom: 24px;
+  }
+  header.hero h1 { font-size: 24px; margin-bottom: 8px; }
+  header.hero p { opacity: .92; font-size: 14px; }
+  h2 { font-size: 18px; margin: 30px 0 14px; padding-left: 12px; border-left: 4px solid var(--blue); }
+  figure { margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+  figure svg { width: 100%; height: auto; display: block; }
+  figcaption { text-align: center; color: var(--muted); font-size: 13px; margin-top: 10px; }
+  table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: var(--radius); overflow: hidden; font-size: 14px; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: #eef2ff; font-weight: 600; }
+  tr:last-child td { border-bottom: none; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; margin-bottom: 14px; }
+  .note { background: #fffbeb; border: 1px solid #fde68a; border-radius: var(--radius); padding: 14px 16px; margin-top: 18px; font-size: 14px; }
+  footer { margin-top: 36px; color: var(--muted); font-size: 12px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>云端全链路流程图</h1>
+  <p>从数据源到企业微信群 · GitHub Actions 每小时 :46 · 双通道并行（2026-08-15 双键去重版）</p>
+</header>
+
+<h2>全链路图</h2>
+<figure>
+  <img src="assets/cloud-flow.svg" alt="云端全链路流程图" style="width:100%;height:auto;">
+  <figcaption>蓝 = 正式链（对照基准）· 绿 = 预览链（候选升级）· 两条链完全独立</figcaption>
+</figure>
+
+<h2>各环节说明</h2>
+<table>
+  <tr><th>#</th><th>环节</th><th>要点</th></tr>
+  <tr><td>①</td><td>触发</td><td>GitHub Actions cron 每小时 :46，可手动 Run workflow</td></tr>
+  <tr><td>②</td><td>环境准备</td><td>checkout → Python → 恢复 cache（last_sent.json + last_sent_engine.json）→ Secrets 注入正式 key + 测试 key</td></tr>
+  <tr><td>③</td><td>抓取</td><td>Google News RSS × 8 查询（Reuters/Bloomberg × china/beijing/taiwan/hong kong，when:1d）；失败查询重试 1 次(5s)</td></tr>
+  <tr><td>④</td><td>单批内去重</td><td>URL + 标题双键跨查询合并 → 约 300-400 条</td></tr>
+  <tr><td>⑤</td><td>双通道</td><td>主链布尔 → 正式群；预览链引擎（Tier1≥2.887/Tier2≥0.76）→ 测试群；各自独立跨批双键去重</td></tr>
+  <tr><td>⑥</td><td>推送</td><td>正式 webhook → 正式群；测试 webhook → 测试群（头部统计 Tier1/Tier2/本次新增）</td></tr>
+  <tr><td>⑦</td><td>状态收尾</td><td>推送成功 → save_state 双键写回 → cache 保存（key=reuters-last-sent-&lt;run_id&gt;）→ 下次恢复增量</td></tr>
+</table>
+
+<h2>双通道对比</h2>
+<table>
+  <tr><th>维度</th><th>主链（布尔）→ 正式群</th><th>预览链（引擎）→ 测试群</th></tr>
+  <tr><td>过滤</td><td>(keyword_hit or company_hit) and within_24h</td><td>12 层词库 + 23 组合 + BM25 → 0.6/0.4 融合 → Tier 分层 → 黑名单剔除</td></tr>
+  <tr><td>跨批去重</td><td>last_sent.json（URL+标题双键）</td><td>last_sent_engine.json（URL+标题双键）</td></tr>
+  <tr><td>失败处理</td><td>重试 1 次，仍失败红叉</td><td>仅 WARN，正式链绿勾保留</td></tr>
+  <tr><td>无新条</td><td>推 idle 状态消息</td><td>不推（防刷屏）</td></tr>
+</table>
+
+<div class="note">
+  <b>注意：</b>预览链失败不会让 Actions 变红——排查重复/缺失问题时，要看日志 Ctrl+F 搜 <code>Engine preview</code>，不能只看 Actions 状态。
+</div>
+
+<footer>AutoClaw · Reuters China Push · 云端全链路 · 2026-08-15</footer>
+</div>
+</body>
+</html>

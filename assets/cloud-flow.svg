@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1320 1010" font-family="'Microsoft YaHei','PingFang SC',sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#6b7280"/>
+    </marker>
+    <marker id="arrowB" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrowG" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#059669"/>
+    </marker>
+  </defs>
+  <rect width="1320" height="1010" fill="#f6f7fb"/>
+  <text x="660" y="44" text-anchor="middle" font-size="22" font-weight="bold" fill="#1f2430">Reuters China Push · 云端全链路（GitHub Actions → 企业微信群）</text>
+  <text x="660" y="68" text-anchor="middle" font-size="13" fill="#6b7280">cron 每小时 :46 · 命令：python fetch_reuters.py --engine-preview · 双通道并行（2026-08-15 双键去重版）</text>
+
+  <!-- 1 触发 -->
+  <rect x="460" y="92" width="400" height="58" rx="10" fill="#fff" stroke="#d1d5db"/>
+  <text x="660" y="116" text-anchor="middle" font-size="14" font-weight="bold" fill="#1f2430">① 触发</text>
+  <text x="660" y="138" text-anchor="middle" font-size="12" fill="#374151">GitHub Actions cron 每小时 :46 · 可手动 Run</text>
+  <line x1="660" y1="150" x2="660" y2="172" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 2 环境准备 -->
+  <rect x="410" y="174" width="500" height="58" rx="10" fill="#fff" stroke="#d1d5db"/>
+  <text x="660" y="198" text-anchor="middle" font-size="14" font-weight="bold" fill="#1f2430">② 环境准备</text>
+  <text x="660" y="220" text-anchor="middle" font-size="12" fill="#374151">checkout → Python → 恢复 cache（last_sent*.json）→ Secrets 注入正式 key + 测试 key</text>
+  <line x1="660" y1="232" x2="660" y2="254" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 3 抓取 -->
+  <rect x="410" y="256" width="500" height="58" rx="10" fill="#fff" stroke="#d1d5db"/>
+  <text x="660" y="280" text-anchor="middle" font-size="14" font-weight="bold" fill="#1f2430">③ 抓取：Google News RSS × 8 查询</text>
+  <text x="660" y="302" text-anchor="middle" font-size="12" fill="#374151">Reuters/Bloomberg × china/beijing/taiwan/hong kong（when:1d）· 失败重试 1 次(5s)</text>
+  <line x1="660" y1="314" x2="660" y2="336" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 4 合并去重 -->
+  <rect x="440" y="338" width="440" height="52" rx="10" fill="#eef2ff" stroke="#a5b4fc"/>
+  <text x="660" y="360" text-anchor="middle" font-size="14" font-weight="bold" fill="#1d4ed8">④ 单批内合并去重（URL+标题双键）</text>
+  <text x="660" y="380" text-anchor="middle" font-size="12" fill="#374151">约 300-400 条原始新闻</text>
+
+  <!-- 分叉标签 -->
+  <text x="660" y="418" text-anchor="middle" font-size="13" font-weight="bold" fill="#6b7280">▼ --engine-preview 双通道并行 ▼</text>
+  <line x1="660" y1="390" x2="340" y2="434" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrowB)"/>
+  <line x1="660" y1="390" x2="980" y2="434" stroke="#059669" stroke-width="1.5" marker-end="url(#arrowG)"/>
+
+  <!-- 5L 主链布尔 -->
+  <rect x="70" y="436" width="540" height="150" rx="12" fill="#eff6ff" stroke="#93c5fd" stroke-width="2"/>
+  <text x="340" y="460" text-anchor="middle" font-size="14" font-weight="bold" fill="#1d4ed8">⑤ 主链：布尔过滤 → 正式群（对照基准）</text>
+  <text x="340" y="484" text-anchor="middle" font-size="12" fill="#374151">(keyword_hit or company_hit) and within_24h</text>
+  <text x="340" y="508" text-anchor="middle" font-size="12" fill="#374151">跨批去重：last_sent.json（URL+标题双键）</text>
+  <text x="340" y="532" text-anchor="middle" font-size="12" fill="#374151">推送失败：重试 1 次，仍失败 exit 非 0（红叉）</text>
+  <text x="340" y="556" text-anchor="middle" font-size="12" fill="#374151">无新条：推 idle 状态消息</text>
+  <text x="340" y="578" text-anchor="middle" font-size="11" fill="#6b7280">--- 官方 webhook（WECOM_WEBHOOK_KEY）---</text>
+  <line x1="340" y1="586" x2="340" y2="628" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrowB)"/>
+
+  <!-- 6L 正式群 -->
+  <rect x="160" y="630" width="360" height="52" rx="10" fill="#fff" stroke="#93c5fd"/>
+  <text x="340" y="652" text-anchor="middle" font-size="14" font-weight="bold" fill="#1d4ed8">⑥ 正式企业微信群</text>
+  <text x="340" y="672" text-anchor="middle" font-size="12" fill="#374151">布尔过滤结果（含 idle）</text>
+
+  <!-- 5R 预览链引擎 -->
+  <rect x="710" y="436" width="540" height="150" rx="12" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="2"/>
+  <text x="980" y="460" text-anchor="middle" font-size="14" font-weight="bold" fill="#047857">⑤ 预览链：引擎过滤 → 测试群（候选升级）</text>
+  <text x="980" y="484" text-anchor="middle" font-size="12" fill="#374151">12 层词库 + 23 组合 + BM25 → 0.6/0.4 融合</text>
+  <text x="980" y="508" text-anchor="middle" font-size="12" fill="#374151">Tier1≥2.887 / Tier2≥0.76 → 黑名单剔除</text>
+  <text x="980" y="532" text-anchor="middle" font-size="12" fill="#374151">跨批去重：last_sent_engine.json（URL+标题双键）</text>
+  <text x="980" y="556" text-anchor="middle" font-size="12" fill="#374151">失败仅 WARN（不影响正式链绿勾）· 无新条不推</text>
+  <text x="980" y="578" text-anchor="middle" font-size="11" fill="#6b7280">--- 测试 webhook（WECOM_WEBHOOK_KEY_TEST）---</text>
+  <line x1="980" y1="586" x2="980" y2="628" stroke="#059669" stroke-width="1.5" marker-end="url(#arrowG)"/>
+
+  <!-- 6R 测试群 -->
+  <rect x="800" y="630" width="360" height="52" rx="10" fill="#fff" stroke="#6ee7b7"/>
+  <text x="980" y="652" text-anchor="middle" font-size="14" font-weight="bold" fill="#047857">⑥ 测试企业微信群</text>
+  <text x="980" y="672" text-anchor="middle" font-size="12" fill="#374151">头部统计：Tier1 N 条 / Tier2 N 条 / 本次新增 M 条</text>
+
+  <!-- 收尾 -->
+  <line x1="340" y1="682" x2="660" y2="746" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="980" y1="682" x2="660" y2="746" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="460" y="748" width="400" height="66" rx="10" fill="#fff" stroke="#d1d5db"/>
+  <text x="660" y="772" text-anchor="middle" font-size="14" font-weight="bold" fill="#1f2430">⑦ 状态收尾</text>
+  <text x="660" y="794" text-anchor="middle" font-size="12" fill="#374151">推送成功 → save_state 双键写回（各自状态文件）</text>
+  <text x="660" y="810" text-anchor="middle" font-size="12" fill="#374151">→ cache 保存（key=reuters-last-sent-&lt;run_id&gt;）→ 下次 run 恢复继续增量</text>
+
+  <text x="660" y="852" text-anchor="middle" font-size="11" fill="#6b7280">主链（蓝）= 正式群对照基准 · 预览链（绿）= 测试群候选方案 · 两条链完全独立（状态/去重/webhook 互不影响）</text>
+</svg>

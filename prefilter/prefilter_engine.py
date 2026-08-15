@@ -274,6 +274,7 @@ def score_one(title: str, cfg: dict) -> dict:
         "keyword_raw": kw_score + combo,
         "bm25_score": bm25,
         "blacklisted": blacklisted(tokens, cfg),
+        "question": bool(title) and title.rstrip().endswith("?"),
     }
 
 
@@ -299,7 +300,7 @@ def score_all(items: list, cfg: dict, thresholds: dict = None) -> list:
         r.update({"score": None, "tier": None})
         results.append(r)
 
-    valid = [r for r in results if not r["blacklisted"]]
+    valid = [r for r in results if not r["blacklisted"] and not r["question"]]
     kw_vals = [r["keyword_raw"] for r in valid]
     bm_vals = [r["bm25_score"] for r in valid]
     kw_z = _zscore(kw_vals)
