@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>两条路线去重逻辑（2026-08-15 双键版）</title>
+<style>
+  :root {
+    --bg: #f6f7fb; --card: #fff; --ink: #1f2430; --muted: #6b7280;
+    --line: #e5e7eb; --blue: #2563eb; --green: #059669; --amber: #d97706;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    background: var(--bg); color: var(--ink); line-height: 1.7;
+    padding: 32px 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  header.hero {
+    background: linear-gradient(135deg, #065f46, #059669);
+    color: #fff; border-radius: var(--radius); padding: 28px;
+    margin-bottom: 24px;
+  }
+  header.hero h1 { font-size: 24px; margin-bottom: 8px; }
+  header.hero p { opacity: .92; font-size: 14px; }
+  h2 { font-size: 18px; margin: 30px 0 14px; padding-left: 12px; border-left: 4px solid var(--blue); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; margin-bottom: 12px; }
+  .timeline { position: relative; padding-left: 28px; }
+  .timeline::before { content: ""; position: absolute; left: 9px; top: 8px; bottom: 8px; width: 2px; background: #dbe3f5; }
+  .step { position: relative; margin-bottom: 16px; }
+  .step-marker {
+    position: absolute; left: -28px; top: 4px; width: 20px; height: 20px;
+    border-radius: 50%; background: var(--blue); color: #fff;
+    font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+  }
+  .step-title { font-weight: 700; font-size: 15px; }
+  .step-text { color: #374151; font-size: 14px; }
+  table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: var(--radius); overflow: hidden; font-size: 14px; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: #ecfdf5; font-weight: 600; }
+  tr:last-child td { border-bottom: none; }
+  .compare { display: flex; gap: 12px; margin: 14px 0; }
+  .compare-box { flex: 1; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
+  .compare-box .cb-title { font-weight: 700; margin-bottom: 4px; }
+  .compare-box.green { border-top: 3px solid var(--green); }
+  .compare-box.blue { border-top: 3px solid var(--blue); }
+  .muted { color: var(--muted); font-size: 13px; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .b-ok { background: #d1fae5; color: #047857; }
+  .b-bad { background: #fee2e2; color: #b91c1c; }
+  footer { margin-top: 36px; color: var(--muted); font-size: 12px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>两条路线去重逻辑</h1>
+  <p>正式链（布尔）与预览链（引擎）· 2026-08-15 双键版 · 修复 Google News 同文多变体 URL 导致的重推</p>
+</header>
+
+<h2>三层去重框架</h2>
+<div class="timeline">
+  <div class="step"><span class="step-marker">1</span>
+    <div class="step-title">抓取合并层（单批内）— fetch_all()</div>
+    <div class="step-text">8 个查询拉回后立刻去重：同批内 URL 相同或标题相同（lower+strip）只留一条。每批 300-400 条压到 ~350 的第一道闸。</div>
+  </div>
+  <div class="step"><span class="step-marker">2</span>
+    <div class="step-title">跨批去重层（按路线）— load_state() / save_state()</div>
+    <div class="step-text">每条路线各自读自己的状态文件，过滤时「URL 不在旧集合 且 标题不在旧标题集合」才算新条；推送成功后才把新条 URL+标题写回状态。</div>
+  </div>
+  <div class="step"><span class="step-marker">3</span>
+    <div class="step-title">状态容量上限 — MAX_STATE = 200</div>
+    <div class="step-text">状态文件只保留最近 200 条 URL + 200 条标题（先进先出），防止无限增长；超过 24h 的旧新闻本来就被 within_24h 挡在门外，200 条足够覆盖。</div>
+  </div>
+</div>
+
+<h2>两条路线对比</h2>
+<div class="compare">
+  <div class="compare-box green">
+    <div class="cb-title">正式链（布尔）→ 正式群</div>
+    <span class="muted">状态文件：last_sent.json</span><br>
+    候选集 = (keyword_hit or company_hit) and within_24h<br>
+    失败重试 1 次，仍失败退出非 0（红叉）
+  </div>
+  <div class="compare-box blue">
+    <div class="cb-title">预览链（引擎）→ 测试群</div>
+    <span class="muted">状态文件：last_sent_engine.json</span><br>
+    全部 within_24h → 引擎评分 → Tier1+2 且非黑名单<br>
+    失败仅 WARN 不影响正式链；无新条不推 idle
+  </div>
+</div>
+
+<table>
+  <tr><th>维度</th><th>正式链（布尔）</th><th>预览链（引擎）</th></tr>
+  <tr><td>候选集</td><td>(keyword_hit or company_hit) and within_24h</td><td>全部 within_24h → 引擎过滤 → Tier1+2 非黑名单</td></tr>
+  <tr><td>跨批去重键</td><td>URL + 标题（双键）</td><td>URL + 标题（双键）</td></tr>
+  <tr><td>状态保存时机</td><td>推送成功后才写</td><td>推送成功后才写（失败不写 → 下次重推）</td></tr>
+  <tr><td>推送失败处理</td><td>重试 1 次，仍失败退出非 0</td><td>重试 1 次，仍失败仅 WARN</td></tr>
+  <tr><td>无新条</td><td>推 idle 状态消息</td><td>不推（防刷屏测试群）</td></tr>
+  <tr><td>两链关系</td><td colspan="2">完全独立：预览推过的正式照样推，反之亦然（并行对比前提）</td></tr>
+</table>
+
+<h2>双键去重实际效果（8/15 修复）</h2>
+<table>
+  <tr><th>场景</th><th>修复前</th><th>修复后</th></tr>
+  <tr><td>同文不同 URL（dog meat 事件）</td><td><span class="badge b-bad">每次重推</span></td><td><span class="badge b-ok">标题键拦住，只推一次</span></td></tr>
+  <tr><td>Reuters/Bloomberg 同题报道</td><td><span class="badge b-bad">各推一条</span></td><td><span class="badge b-ok">视为同一事件，推一条</span></td></tr>
+  <tr><td>同 URL 不同标题（罕见）</td><td><span class="badge b-ok">URL 键拦</span></td><td><span class="badge b-ok">URL 键照拦</span></td></tr>
+  <tr><td>完全不同新闻</td><td><span class="badge b-ok">放行</span></td><td><span class="badge b-ok">放行</span></td></tr>
+</table>
+
+<div class="card">
+  <b>过渡注意：</b>云端旧状态文件只有 URL（无标题键），标题键要跑几次才积累满，升级后头一两批可能还有个别旧文重复，之后彻底消失。
+</div>
+
+<footer>AutoClaw · Reuters China Push · 去重逻辑说明 · 2026-08-15</footer>
+</div>
+</body>
+</html>

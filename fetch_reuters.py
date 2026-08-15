@@ -457,20 +457,33 @@ def fetch_all() -> tuple:
     return merged, failures
 
 
-def load_state(path: str = STATE_FILE) -> list:
+def load_state(path: str = STATE_FILE):
+    """返回 (urls: set, titles: set)。兼容旧格式（纯 URL 字符串列表）。
+    双键去重：Google News 对同一报道会生成多个不同跳转 URL（实测 78/4347 标题存在多 URL 变体），
+    只按 URL 记会导致跨批重推；标题键兜底拦截同文不同 URL。"""
+    urls, titles = set(), set()
     if os.path.exists(path):
         try:
             with open(path, encoding="utf-8") as f:
-                return json.load(f)
+                for x in json.load(f):
+                    if isinstance(x, dict):
+                        if x.get("u"):
+                            urls.add(x["u"])
+                        if x.get("t"):
+                            titles.add(x["t"])
+                    elif isinstance(x, str) and x:
+                        urls.add(x)
         except Exception:
-            return []
-    return []
+            pass
+    return urls, titles
 
 
-def save_state(urls, path: str = STATE_FILE) -> None:
-    urls = list(urls)
+def save_state(urls, titles, path: str = STATE_FILE) -> None:
+    """保存去重状态（URL + 标题双键）。旧格式纯 URL 列表自动升级为 dict 条目。"""
+    entries = [{"u": u} for u in list(urls)[-MAX_STATE:]] \
+        + [{"t": t} for t in list(titles)[-MAX_STATE:]]
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(urls[-MAX_STATE:], f, ensure_ascii=False)
+        json.dump(entries, f, ensure_ascii=False)
 
 
 def engine_filter(items: list, thresholds: dict = None) -> tuple:
@@ -511,8 +524,10 @@ def preview_push(items: list, note: str = None) -> bool:
 
     fresh_items = [it for it in items if within_24h(it["published"])]
     filtered, stats, _ = engine_filter(fresh_items, _PREFILTER_CALIB)
-    old = set(load_state(STATE_FILE_ENGINE))
-    fresh = [it for it in filtered if it["url"] not in old]
+    old_urls, old_titles = load_state(STATE_FILE_ENGINE)
+    fresh = [it for it in filtered
+             if it["url"] not in old_urls
+             and it["title"].lower().strip() not in old_titles]
     print(f"Engine preview: {len(filtered)} filtered, {len(fresh)} new for test group "
           f"(tier1={stats['tier1']}, tier2={stats['tier2']})")
     if not fresh:
@@ -533,7 +548,9 @@ def preview_push(items: list, note: str = None) -> bool:
     if not push_with_retry(webhook, source_groups, note=note, stats=stats2):
         print("WARN: engine-preview push failed (retried once); formal chain unaffected")
         return False
-    save_state(old | {it["url"] for it in fresh}, STATE_FILE_ENGINE)
+    save_state(old_urls | {it["url"] for it in fresh},
+               old_titles | {it["title"].lower().strip() for it in fresh},
+               STATE_FILE_ENGINE)
     print(f"Engine preview: pushed {len(fresh)} items to test webhook, state saved")
     return True
 
@@ -609,9 +626,11 @@ def _run(dump: bool = False, dump_only: bool = False, engine_preview: bool = Fal
         print(f"Dump-only mode: {len(items)} raw, {len(filtered)} would pass filter; no push")
         return 0
 
-    # 去重
-    old = set(load_state())
-    fresh = [it for it in filtered if it["url"] not in old]
+    # 去重（URL + 标题双键：Google News 同文多变体 URL，标题兜底）
+    old_urls, old_titles = load_state()
+    fresh = [it for it in filtered
+             if it["url"] not in old_urls
+             and it["title"].lower().strip() not in old_titles]
     print(f"New items: {len(fresh)}")
 
     # 正式 webhook：preview 模式下允许缺失（本地只验预览通道时跳过正式链）
@@ -642,7 +661,8 @@ def _run(dump: bool = False, dump_only: bool = False, engine_preview: bool = Fal
                    "推送失败（重试 1 次后仍失败）\n建议: 查看 GitHub Actions 日志确认 webhook 状态")
         return 1
 
-    save_state(old | {it["url"] for it in fresh})
+    save_state(old_urls | {it["url"] for it in fresh},
+               old_titles | {it["title"].lower().strip() for it in fresh})
     print(f"Pushed {len(fresh)} items to WeCom, state saved")
 
     # 引擎预览验证通道（可选）：引擎过滤结果推测试 webhook，与正式链完全隔离
