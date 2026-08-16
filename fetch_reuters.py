@@ -576,12 +576,14 @@ def preview_push(items: list, note: str = None) -> bool:
     stats2 = dict(stats)
     stats2["new_count"] = len(fresh)
 
+    # 按条目实际 source 字段分组（2026-08-17 修复：原遍历 SOURCES 会丢弃 US Policy 条目）
+    by_src = {}
+    for it in fresh:
+        by_src.setdefault(it["source"], []).append(it)
     source_groups = []
-    for src in SOURCES:
-        sub = [it for it in fresh if it["source"] == src]
-        if sub:
-            sub.sort(key=lambda it: parse_dt(it["published"]), reverse=True)
-            source_groups.append((src, sub))
+    for src, sub in by_src.items():
+        sub.sort(key=lambda it: parse_dt(it["published"]), reverse=True)
+        source_groups.append((src, sub))
 
     if not push_with_retry(webhook, source_groups, note=note, stats=stats2):
         print("WARN: engine-preview push failed (retried once); formal chain unaffected")
