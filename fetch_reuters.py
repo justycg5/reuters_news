@@ -79,6 +79,32 @@ SOURCES = {
         "&hl=en-US&gl=US&ceid=US:en",
     ],
 }
+
+# 美政策源查询组（纯美政策新闻，标题不带 China 字眼也能抓到）：
+# 覆盖 Fed 货币政策 / 关税制裁 / 芯片管制——8/16 实测每批新增 ~204 条。
+# 由 --us-policy 开关启用（默认关闭），云端 workflow 不传参数时行为不变。
+US_POLICY_SOURCES = {
+    "US Policy": [
+        "https://news.google.com/rss/search"
+        "?q=site%3Areuters.com%20%28%22federal%20reserve%22%20OR%20fomc%20OR%20%22rate%20cut%22%20OR%20%22rate%20hike%22%20OR%20%22rate%20decision%22%20OR%20inflation%20OR%20cpi%29%20when%3A1d"
+        "&hl=en-US&gl=US&ceid=US:en",
+        "https://news.google.com/rss/search"
+        "?q=site%3Areuters.com%20%28tariff%20OR%20sanction%20OR%20sanctions%20OR%20%22export%20controls%22%20OR%20%22trade%20policy%22%29%20when%3A1d"
+        "&hl=en-US&gl=US&ceid=US:en",
+        "https://news.google.com/rss/search"
+        "?q=site%3Areuters.com%20%28semiconductor%20OR%20%22chip%20export%22%20OR%20%22ai%20chips%22%20OR%20nvidia%20OR%20%22chip%20ban%22%29%20when%3A1d"
+        "&hl=en-US&gl=US&ceid=US:en",
+        "https://news.google.com/rss/search"
+        "?q=site%3Abloomberg.com%20%28%22federal%20reserve%22%20OR%20fomc%20OR%20%22rate%20cut%22%20OR%20%22rate%20hike%22%20OR%20%22rate%20decision%22%20OR%20inflation%20OR%20cpi%29%20when%3A1d"
+        "&hl=en-US&gl=US&ceid=US:en",
+        "https://news.google.com/rss/search"
+        "?q=site%3Abloomberg.com%20%28tariff%20OR%20sanction%20OR%20sanctions%20OR%20%22export%20controls%22%20OR%20%22trade%20policy%22%29%20when%3A1d"
+        "&hl=en-US&gl=US&ceid=US:en",
+        "https://news.google.com/rss/search"
+        "?q=site%3Abloomberg.com%20%28semiconductor%20OR%20%22chip%20export%22%20OR%20%22ai%20chips%22%20OR%20nvidia%20OR%20%22chip%20ban%22%29%20when%3A1d"
+        "&hl=en-US&gl=US&ceid=US:en",
+    ],
+}
 KEYWORDS = [
     "china", "chinese", "beijing", "hong kong", "taiwan",
     "xi jinping", "us-china", "sino-", "shanghai", "shenzhen",
@@ -438,13 +464,14 @@ def _fetch_query(src: str, q: str, seen_url: set, seen_title: set, merged: list,
         merged.append(it)
 
 
-def fetch_all() -> tuple:
+def fetch_all(include_us_policy: bool = False) -> tuple:
     """拉取全部来源×查询并合并去重（URL 去重 + 标题兜底去重），条目打 source 来源标签。
     返回 (items, failures)：failures 为 [(来源名, 查询URL, 异常摘要), ...]。
     失败查询自动重试 1 次（间隔 5 秒），缓解 Google News 对云 IP 段瞬时风控（503）导致的假失败。"""
+    sources = {**SOURCES, **US_POLICY_SOURCES} if include_us_policy else SOURCES
     seen_url, seen_title, merged = set(), set(), []
     failures = []
-    for src, queries in SOURCES.items():
+    for src, queries in sources.items():
         for q in queries:
             _fetch_query(src, q, seen_url, seen_title, merged, failures)
     if failures:
@@ -591,9 +618,10 @@ def dump_items(items: list, results: dict = None) -> None:
     print(f"Dumped {n} items to {path}")
 
 
-def _run(dump: bool = False, dump_only: bool = False, engine_preview: bool = False) -> int:
+def _run(dump: bool = False, dump_only: bool = False, engine_preview: bool = False,
+         us_policy: bool = False) -> int:
     total_queries = sum(len(v) for v in SOURCES.values())
-    items, failures = fetch_all()
+    items, failures = fetch_all(include_us_policy=us_policy)
     note = fail_summary(failures, total_queries) if failures else None
     if failures:
         print(f"WARN: {note}")
@@ -680,9 +708,12 @@ def main() -> int:
                         help="只抓取 + 落盘，不推送（本机采集数据用，供阈值校准）")
     parser.add_argument("--engine-preview", action="store_true",
                         help="并行验证：正式链维持布尔过滤推正式群，另将引擎过滤结果推测试群（独立去重）")
+    parser.add_argument("--us-policy", action="store_true",
+                        help="启用美政策源查询组（Fed/关税制裁/芯片，+6 查询，本地采集攒数据用）")
     args = parser.parse_args()
     try:
-        return _run(dump=args.dump, dump_only=args.dump_only, engine_preview=args.engine_preview)
+        return _run(dump=args.dump, dump_only=args.dump_only, engine_preview=args.engine_preview,
+                    us_policy=args.us_policy)
     except Exception as e:
         tb = traceback.format_exc()
         print(f"UNCAUGHT ERROR:\n{tb}")
