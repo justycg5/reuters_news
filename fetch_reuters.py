@@ -647,7 +647,8 @@ def dump_items(items: list, results: dict = None) -> None:
 
 def _run(dump: bool = False, dump_only: bool = False, engine_preview: bool = False,
          us_policy: bool = False) -> int:
-    total_queries = sum(len(v) for v in SOURCES.values())
+    src_map = {**SOURCES, **US_POLICY_SOURCES} if us_policy else SOURCES
+    total_queries = sum(len(v) for v in src_map.values())
     items, failures = fetch_all(include_us_policy=us_policy)
     note = fail_summary(failures, total_queries) if failures else None
     if failures:
@@ -737,7 +738,7 @@ def main() -> int:
     parser.add_argument("--engine-preview", action="store_true",
                         help="并行验证：正式链维持布尔过滤推正式群，另将引擎过滤结果推测试群（独立去重）")
     parser.add_argument("--us-policy", action="store_true",
-                        help="启用美政策源查询组（Fed/关税制裁/芯片，+6 查询，本地采集攒数据用）")
+                        help="启用美政策源查询组（Fed/关税/制裁/芯片/黑名单/出口管制，+12 查询，本地采集攒数据用）")
     args = parser.parse_args()
     try:
         return _run(dump=args.dump, dump_only=args.dump_only, engine_preview=args.engine_preview,
