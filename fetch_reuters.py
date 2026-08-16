@@ -127,6 +127,16 @@ US_POLICY_SOURCES = {
         "&hl=en-US&gl=US&ceid=US:en",
     ],
 }
+
+# 矿产源（2026-08-17 引入）：Mining.com 矿业专站 RSS（无鉴权 GET 接口）。
+# 背景：Google News RSS 对矿种词全文匹配命中站内 ticker 页/公司页（单词 100 条全是股票页、
+# 词组 0 条），抓不到矿产新闻（与 US Policy 同根因）。Mining.com 是矿业专站，
+# 返回纯矿产新闻（金价/铜价/锂/铀等），标准 RSS 2.0 可复用 parse_rss。
+MINERAL_SOURCES = {
+    "Mining.com": [
+        "https://www.mining.com/feed/",
+    ],
+}
 KEYWORDS = [
     "china", "chinese", "beijing", "hong kong", "taiwan",
     "xi jinping", "us-china", "sino-", "shanghai", "shenzhen",
@@ -178,7 +188,11 @@ def company_hit(title: str) -> bool:
 # 实测：dump 2400+ 条中此类新闻约 4 条（drone tariffs 等），量小精准；
 # 产业词用词边界，避免子串误匹配（如 "ai " 撞 "Dubai"）。
 TOPIC_RE = re.compile(
-    r"\b(?:tariff\w*|sanction\w*|blacklist\w*|export control\w*|entity list\w*)\b",
+    r"\b(?:tariff\w*|sanction\w*|blacklist\w*|entity list\w*)\b"
+    # 进出口管制（2026-08-17 优化：原 "export control" 短语在真实标题中 0 命中，改为动词+对象变体）
+    r"|\b(?:export|import)\w*\s+(?:curb\w*|ban\w*|restrict\w*|control\w*|limit\w*)\b"
+    r"|\b(?:curb\w*|restrict\w*|ban\w*|limit\w*|block\w*|halt\w*|bar\w*|tighten\w*)"
+    r"\w*\s+(?:on\s+)?(?:export\w*|import\w*|shipment\w*|sale\w*|transfer\w*)\b",
     re.IGNORECASE,
 )
 INDUSTRY_RE = re.compile(
@@ -194,15 +208,29 @@ def implicit_china_hit(title: str) -> bool:
     return bool(TOPIC_RE.search(title) and INDUSTRY_RE.search(title))
 
 
-# 预览链 US Policy 主题词校验（2026-08-16）：
-# US Policy 查询为全文匹配，136 条去重中 16 条（12%）被引擎误评 Tier1/2
-# （"Zelenskyy Says Ukraine Strikes…"、"Peru's Economy…" 等标题无关噪音）。
-# 推送前要求标题含美政策主题词（tariff/sanction/blacklist/export control/entity list/fed）
-# 或中国词或公司名，否则丢弃（仅统计不进测试群）。
-# 比 TOPIC_RE 多 fed/federal reserve（Fed 货币政策属 US Policy 组核心目标）；
+# 预览链需求校验词表（2026-08-16 用户定案：三条需求校验只针对预览链）：
+# 需求 3（美国影响中国）的政策词。Google News RSS 为全文匹配，引擎会误评高分噪音
+# （"Zelenskyy Says Ukraine Strikes…"、"Peru's Economy…" 等标题无关条目，
+# 实测 US Policy 源 136 条中 16 条被误评 Tier1/2）。
+# 推送前要求标题命中：美政策词（本正则）或中国词或公司名，否则丢弃。
+# 含 fed/federal reserve（Fed 货币政策属需求 3 明确列举）；
 # 不含产业词（如 chips），避免 "Watch Modi Puts Chips…" 这类误放行。
 US_POLICY_PREVIEW_RE = re.compile(
-    r"\b(?:tariff\w*|sanction\w*|blacklist\w*|export control\w*|entity list\w*|fed\b|federal reserve)\b",
+    r"\b(?:tariff\w*|sanction\w*|blacklist\w*|entity list\w*|fed\b|federal reserve)\b"
+    # 进出口管制（2026-08-17 优化：原 "export control" 短语 0 命中，改为动词+对象变体）
+    r"|\b(?:export|import)\w*\s+(?:curb\w*|ban\w*|restrict\w*|control\w*|limit\w*)\b"
+    r"|\b(?:curb\w*|restrict\w*|ban\w*|limit\w*|block\w*|halt\w*|bar\w*|tighten\w*)"
+    r"\w*\s+(?:on\s+)?(?:export\w*|import\w*|shipment\w*|sale\w*|transfer\w*)\b",
+    re.IGNORECASE,
+)
+# 矿产词表（2026-08-17 引入 Mining.com 矿产源）：预览链需求校验用，
+# 覆盖“世界重大矿产事件”（贵金属/工业金属/电池金属/稀土/关键矿产/煤炭）。
+# 词边界匹配，避开歧义词（lead=铅/领导、steel=钢铁成品均不收）。
+MINERAL_RE = re.compile(
+    r"\b(?:copper|lithium|nickel|cobalt|zinc|tin|silver|aluminum|aluminium|"
+    r"uranium|platinum|palladium|manganese|graphite|bauxite|tungsten|antimony|"
+    r"gallium|germanium|molybdenum|indium|gold|coal|bullion|mining|miners?)\b"
+    r"|rare[- ]earth|iron ore|critical minerals?",
     re.IGNORECASE,
 )
 STATE_FILE = "last_sent.json"  # 正式链去重状态（原有）
@@ -526,7 +554,7 @@ def fetch_all(include_us_policy: bool = False) -> tuple:
     """拉取全部来源×查询并合并去重（URL 去重 + 标题兜底去重），条目打 source 来源标签。
     返回 (items, failures)：failures 为 [(来源名, 查询URL, 异常摘要), ...]。
     失败查询自动重试 1 次（间隔 5 秒），缓解 Google News 对云 IP 段瞬时风控（503）导致的假失败。"""
-    sources = {**SOURCES, **US_POLICY_SOURCES} if include_us_policy else SOURCES
+    sources = {**SOURCES, **US_POLICY_SOURCES, **MINERAL_SOURCES} if include_us_policy else SOURCES
     seen_url, seen_title, merged = set(), set(), []
     failures = []
     for src, queries in sources.items():
@@ -595,8 +623,14 @@ def engine_filter(items: list, thresholds: dict = None) -> tuple:
 
 
 def preview_push(items: list, note: str = None) -> bool:
-    """引擎预览验证通道：引擎过滤结果推送到测试 webhook（独立状态 last_sent_engine.json）。
-    与正式链完全隔离（独立去重/独立状态），失败只 WARN 不影响正式链退出码。
+    """预览通道（测试群）：引擎 Tier1/2 门槛 + 需求校验。
+    2026-08-16 用户定案：
+      正式链 = 中国（大陆/香港/台湾/重要公司）发生的事（简单布尔）；
+      预览链 = 引擎评分 Tier1/2 通过，且标题满足需求校验
+        （需求2：中国词/公司名 OR 需求3：美政策词 OR 需求4：矿产词）；
+        Mining.com 矿产专站条目绕过引擎门槛，直接需求校验。
+      预览链不一定包含正式链全部信息（引擎门槛独立判定）。
+    独立状态 last_sent_engine.json，失败只 WARN 不影响正式链。
     无测试 key / 引擎未加载 / 无新条时静默跳过（不推 idle，避免刷屏测试群）。"""
     webhook = webhook_url_test()
     if not webhook:
@@ -608,28 +642,27 @@ def preview_push(items: list, note: str = None) -> bool:
         return True
 
     fresh_items = [it for it in items if within_24h(it["published"])]
+    # 引擎门槛：Tier1/2（blacklisted/疑问句已在 engine_filter 剔除）
     filtered, stats, _ = engine_filter(fresh_items, _PREFILTER_CALIB)
     old_urls, old_titles = load_state(STATE_FILE_ENGINE)
-    fresh = [it for it in filtered
-             if it["url"] not in old_urls
+    # 候选集 = 引擎 Tier1/2 条目 ∪ Mining.com 矿产专站条目（绕过引擎门槛）。
+    # 2026-08-17：矿产新闻（铜/锂等）引擎评分偏低（T3，引擎为“中国相关”校准），
+    # 引擎门槛会误伤；Mining.com 是矿产专站，来源本身无 Google News 全文匹配噪音，
+    # 直接用需求校验（矿种词）过滤即可（Op-ed/公司八卦无矿种词会被拦）。
+    filtered_titles = {it["title"] for it in filtered}
+    mining_extra = [it for it in fresh_items
+                    if it["source"] == "Mining.com" and it["title"] not in filtered_titles]
+    candidates = filtered + mining_extra
+    # 需求校验：需求2（中国词/公司名）OR 需求3（美政策词）OR 需求4（矿产词）
+    fresh = [it for it in candidates
+             if (US_POLICY_PREVIEW_RE.search(it["title"])
+                  or MINERAL_RE.search(it["title"])
+                  or keyword_hit(it["title"])
+                  or company_hit(it["title"]))
+             and it["url"] not in old_urls
              and it["title"].lower().strip() not in old_titles]
-    print(f"Engine preview: {len(filtered)} filtered, {len(fresh)} new for test group "
-          f"(tier1={stats['tier1']}, tier2={stats['tier2']})")
-
-    # US Policy 条目标题主题词校验：拦截引擎误评的全文匹配噪音（见 US_POLICY_PREVIEW_RE 注释）
-    kept, skipped_policy = [], 0
-    for it in fresh:
-        if it.get("source") == "US Policy" and not (
-                US_POLICY_PREVIEW_RE.search(it["title"])
-                or keyword_hit(it["title"])
-                or company_hit(it["title"])):
-            skipped_policy += 1
-            continue
-        kept.append(it)
-    if skipped_policy:
-        print(f"Engine preview: dropped {skipped_policy} US Policy noise item(s) "
-              f"(title lacks policy topic)")
-    fresh = kept
+    print(f"Engine preview: {len(filtered)} filtered (tier1={stats['tier1']} tier2={stats['tier2']}), "
+          f"+{len(mining_extra)} mining, {len(fresh)} new for test group")
 
     if not fresh:
         print("Engine preview: no new items, skip push")
@@ -701,7 +734,7 @@ def dump_items(items: list, results: dict = None) -> None:
 
 def _run(dump: bool = False, dump_only: bool = False, engine_preview: bool = False,
          us_policy: bool = False) -> int:
-    src_map = {**SOURCES, **US_POLICY_SOURCES} if us_policy else SOURCES
+    src_map = {**SOURCES, **US_POLICY_SOURCES, **MINERAL_SOURCES} if us_policy else SOURCES
     total_queries = sum(len(v) for v in src_map.values())
     items, failures = fetch_all(include_us_policy=us_policy)
     note = fail_summary(failures, total_queries) if failures else None
@@ -717,10 +750,11 @@ def _run(dump: bool = False, dump_only: bool = False, engine_preview: bool = Fal
         return 1
     print(f"Merged {len(items)} raw items (deduped)")
 
-    # 主链（原有链条不动）：布尔过滤 = 关键词子串 or 公司名词边界 or 美政策暗含中国产业影响 + 24h
+    # 主链（正式群）：简单布尔 = 关键词子串 or 公司名词边界 + 24h。
+    # 2026-08-16 起需求校验（含美政策/暗含产业影响）收敛到预览链，正式链保持高纯度：
+    # 只推标题明确含中国词或中国公司名的新闻。
     filtered = [it for it in items
-                if (keyword_hit(it["title"]) or company_hit(it["title"])
-                    or implicit_china_hit(it["title"]))
+                if (keyword_hit(it["title"]) or company_hit(it["title"]))
                 and within_24h(it["published"])]
     print(f"After filter: {len(filtered)} items")
 
@@ -762,7 +796,7 @@ def _run(dump: bool = False, dump_only: bool = False, engine_preview: bool = Fal
     # 按来源分组（SOURCES 固定顺序 + US Policy），组内时间倒序（最新在前）
     # 2026-08-17 修复：原仅遍历 SOURCES，US Policy 条目（带中国关键词的制裁/关税新闻）被丢弃且被标记已推
     source_groups = []
-    for src in list(SOURCES) + list(US_POLICY_SOURCES):
+    for src in list(SOURCES) + list(US_POLICY_SOURCES) + list(MINERAL_SOURCES):
         sub = [it for it in fresh if it["source"] == src]
         if sub:
             sub.sort(key=lambda it: parse_dt(it["published"]), reverse=True)
