@@ -81,9 +81,11 @@ SOURCES = {
 }
 
 # 美政策源查询组（纯美政策新闻，标题不带 China 字眼也能抓到）：
-# 覆盖 Fed 货币政策 / 关税 / 制裁 / 芯片管制。
+# 覆盖 Fed 货币政策 / 关税 / 制裁 / 芯片管制 / 军工黑名单 / 出口管制。
 # 注意：Google News RSS 不支持括号 OR 组合语法（实测 228 条仅 2% 相关，降级为 site 泛搜索），
 # 因此每个主题用单词/词组独立查询（Google 自动词形变化：sanction 会匹配 sanctions）。
+# 2026-08-17 补：blacklist（DJI/WuXi 军工黑名单类）+ export control（出口管制类），
+# 覆盖“纯美方视角标题”（无 China 字眼）的制裁/名单新闻；military/pentagon 不加（泛词噪音）。
 # 由 --us-policy 开关启用（默认关闭），云端 workflow 不传参数时行为不变。
 US_POLICY_SOURCES = {
     "US Policy": [
@@ -100,6 +102,12 @@ US_POLICY_SOURCES = {
         "?q=site%3Areuters.com%20semiconductor%20when%3A1d"
         "&hl=en-US&gl=US&ceid=US:en",
         "https://news.google.com/rss/search"
+        "?q=site%3Areuters.com%20blacklist%20when%3A1d"
+        "&hl=en-US&gl=US&ceid=US:en",
+        "https://news.google.com/rss/search"
+        "?q=site%3Areuters.com%20%22export%20control%22%20when%3A1d"
+        "&hl=en-US&gl=US&ceid=US:en",
+        "https://news.google.com/rss/search"
         "?q=site%3Abloomberg.com%20%22federal%20reserve%22%20when%3A1d"
         "&hl=en-US&gl=US&ceid=US:en",
         "https://news.google.com/rss/search"
@@ -110,6 +118,12 @@ US_POLICY_SOURCES = {
         "&hl=en-US&gl=US&ceid=US:en",
         "https://news.google.com/rss/search"
         "?q=site%3Abloomberg.com%20semiconductor%20when%3A1d"
+        "&hl=en-US&gl=US&ceid=US:en",
+        "https://news.google.com/rss/search"
+        "?q=site%3Abloomberg.com%20blacklist%20when%3A1d"
+        "&hl=en-US&gl=US&ceid=US:en",
+        "https://news.google.com/rss/search"
+        "?q=site%3Abloomberg.com%20%22export%20control%22%20when%3A1d"
         "&hl=en-US&gl=US&ceid=US:en",
     ],
 }
