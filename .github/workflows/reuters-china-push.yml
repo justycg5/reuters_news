@@ -41,9 +41,11 @@ jobs:
 
       # --engine-preview: 正式链维持布尔过滤推正式群（原有链条不动），
       # 另将引擎过滤结果推测试群（WECOM_WEBHOOK_KEY_TEST），独立去重，用于并行验证。
+      # --us-policy: 启用美政策源查询组（Fed/关税制裁/芯片，+6 查询），
+      # 正式群只放行带中国关键词的条目（布尔过滤），测试群全量观察引擎表现。
       # 验证期结束后去掉 --engine-preview 即恢复纯正式推送。
       - name: Fetch and push
-        run: python fetch_reuters.py --engine-preview
+        run: python fetch_reuters.py --engine-preview --us-policy
         env:
           # 在仓库 Settings → Secrets and variables → Actions 中配置:
           #   WECOM_WEBHOOK_KEY = 正式群 webhook key（URL 中 key= 后那串）
