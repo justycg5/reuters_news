@@ -81,27 +81,35 @@ SOURCES = {
 }
 
 # 美政策源查询组（纯美政策新闻，标题不带 China 字眼也能抓到）：
-# 覆盖 Fed 货币政策 / 关税制裁 / 芯片管制——8/16 实测每批新增 ~204 条。
+# 覆盖 Fed 货币政策 / 关税 / 制裁 / 芯片管制。
+# 注意：Google News RSS 不支持括号 OR 组合语法（实测 228 条仅 2% 相关，降级为 site 泛搜索），
+# 因此每个主题用单词/词组独立查询（Google 自动词形变化：sanction 会匹配 sanctions）。
 # 由 --us-policy 开关启用（默认关闭），云端 workflow 不传参数时行为不变。
 US_POLICY_SOURCES = {
     "US Policy": [
         "https://news.google.com/rss/search"
-        "?q=site%3Areuters.com%20%28%22federal%20reserve%22%20OR%20fomc%20OR%20%22rate%20cut%22%20OR%20%22rate%20hike%22%20OR%20%22rate%20decision%22%20OR%20inflation%20OR%20cpi%29%20when%3A1d"
+        "?q=site%3Areuters.com%20%22federal%20reserve%22%20when%3A1d"
         "&hl=en-US&gl=US&ceid=US:en",
         "https://news.google.com/rss/search"
-        "?q=site%3Areuters.com%20%28tariff%20OR%20sanction%20OR%20sanctions%20OR%20%22export%20controls%22%20OR%20%22trade%20policy%22%29%20when%3A1d"
+        "?q=site%3Areuters.com%20tariff%20when%3A1d"
         "&hl=en-US&gl=US&ceid=US:en",
         "https://news.google.com/rss/search"
-        "?q=site%3Areuters.com%20%28semiconductor%20OR%20%22chip%20export%22%20OR%20%22ai%20chips%22%20OR%20nvidia%20OR%20%22chip%20ban%22%29%20when%3A1d"
+        "?q=site%3Areuters.com%20sanction%20when%3A1d"
         "&hl=en-US&gl=US&ceid=US:en",
         "https://news.google.com/rss/search"
-        "?q=site%3Abloomberg.com%20%28%22federal%20reserve%22%20OR%20fomc%20OR%20%22rate%20cut%22%20OR%20%22rate%20hike%22%20OR%20%22rate%20decision%22%20OR%20inflation%20OR%20cpi%29%20when%3A1d"
+        "?q=site%3Areuters.com%20semiconductor%20when%3A1d"
         "&hl=en-US&gl=US&ceid=US:en",
         "https://news.google.com/rss/search"
-        "?q=site%3Abloomberg.com%20%28tariff%20OR%20sanction%20OR%20sanctions%20OR%20%22export%20controls%22%20OR%20%22trade%20policy%22%29%20when%3A1d"
+        "?q=site%3Abloomberg.com%20%22federal%20reserve%22%20when%3A1d"
         "&hl=en-US&gl=US&ceid=US:en",
         "https://news.google.com/rss/search"
-        "?q=site%3Abloomberg.com%20%28semiconductor%20OR%20%22chip%20export%22%20OR%20%22ai%20chips%22%20OR%20nvidia%20OR%20%22chip%20ban%22%29%20when%3A1d"
+        "?q=site%3Abloomberg.com%20tariff%20when%3A1d"
+        "&hl=en-US&gl=US&ceid=US:en",
+        "https://news.google.com/rss/search"
+        "?q=site%3Abloomberg.com%20sanction%20when%3A1d"
+        "&hl=en-US&gl=US&ceid=US:en",
+        "https://news.google.com/rss/search"
+        "?q=site%3Abloomberg.com%20semiconductor%20when%3A1d"
         "&hl=en-US&gl=US&ceid=US:en",
     ],
 }
@@ -559,6 +567,9 @@ def preview_push(items: list, note: str = None) -> bool:
           f"(tier1={stats['tier1']}, tier2={stats['tier2']})")
     if not fresh:
         print("Engine preview: no new items, skip push")
+        # 2026-08-16 用户要求：测试群也推 idle 提示，避免静默无法判断链路状态
+        if not push_idle(webhook, note="引擎预览"):
+            print("WARN: engine-preview idle notice push failed")
         return True
 
     # 头部统计口径：过滤总量（Tier1/2）+ 本次去重后新增条数
