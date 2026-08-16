@@ -689,9 +689,10 @@ def _run(dump: bool = False, dump_only: bool = False, engine_preview: bool = Fal
             preview_push(items, note=note)
         return 0 if ok else 1
 
-    # 按来源分组（保持 SOURCES 固定顺序），组内时间倒序（最新在前）
+    # 按来源分组（SOURCES 固定顺序 + US Policy），组内时间倒序（最新在前）
+    # 2026-08-17 修复：原仅遍历 SOURCES，US Policy 条目（带中国关键词的制裁/关税新闻）被丢弃且被标记已推
     source_groups = []
-    for src in SOURCES:
+    for src in list(SOURCES) + list(US_POLICY_SOURCES):
         sub = [it for it in fresh if it["source"] == src]
         if sub:
             sub.sort(key=lambda it: parse_dt(it["published"]), reverse=True)
