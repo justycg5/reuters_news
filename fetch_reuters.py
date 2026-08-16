@@ -169,6 +169,42 @@ _COMPANY_RE = re.compile(
 def company_hit(title: str) -> bool:
     """标题是否含中国公司名（词边界匹配，独立成词才命中）。"""
     return bool(_COMPANY_RE.search(title))
+
+
+# 美政策『暗含中国产业影响』规则（2026-08-16 用户需求）：
+# 部分美国政策新闻标题无中国词/公司名，但实质影响中国优势产业
+# （如美国对光纤/无人机/光伏/钢铁加征关税，中国是这些产业的全球最大供应方）。
+# 判定 = 美政策主题词 AND 中国优势产业词，两者都在标题中命中才放行。
+# 实测：dump 2400+ 条中此类新闻约 4 条（drone tariffs 等），量小精准；
+# 产业词用词边界，避免子串误匹配（如 "ai " 撞 "Dubai"）。
+TOPIC_RE = re.compile(
+    r"\b(?:tariff\w*|sanction\w*|blacklist\w*|export control\w*|entity list\w*)\b",
+    re.IGNORECASE,
+)
+INDUSTRY_RE = re.compile(
+    r"\b(?:optical\w*|fiber\w*|fibre\w*|telecom\w*|5g|semiconductor\w*|chip\w*|solar\w*|polysilicon\w*|"
+    r"steel\w*|aluminum\w*|aluminium\w*|rare[- ]earth|electric vehicle\w*|battery|batteries|lithium\w*|"
+    r"drone\w*|uav\w*|wind turbine\w*|shipbuilding\w*|textile\w*|artificial intelligence|data center\w*)\b",
+    re.IGNORECASE,
+)
+
+
+def implicit_china_hit(title: str) -> bool:
+    """标题无中国词/公司名时，是否暗含中国产业影响（主题词 AND 产业词）。"""
+    return bool(TOPIC_RE.search(title) and INDUSTRY_RE.search(title))
+
+
+# 预览链 US Policy 主题词校验（2026-08-16）：
+# US Policy 查询为全文匹配，136 条去重中 16 条（12%）被引擎误评 Tier1/2
+# （"Zelenskyy Says Ukraine Strikes…"、"Peru's Economy…" 等标题无关噪音）。
+# 推送前要求标题含美政策主题词（tariff/sanction/blacklist/export control/entity list/fed）
+# 或中国词或公司名，否则丢弃（仅统计不进测试群）。
+# 比 TOPIC_RE 多 fed/federal reserve（Fed 货币政策属 US Policy 组核心目标）；
+# 不含产业词（如 chips），避免 "Watch Modi Puts Chips…" 这类误放行。
+US_POLICY_PREVIEW_RE = re.compile(
+    r"\b(?:tariff\w*|sanction\w*|blacklist\w*|export control\w*|entity list\w*|fed\b|federal reserve)\b",
+    re.IGNORECASE,
+)
 STATE_FILE = "last_sent.json"  # 正式链去重状态（原有）
 STATE_FILE_ENGINE = "last_sent_engine.json"  # 引擎预览链去重状态（独立，测试群验证用）
 MAX_STATE = 200  # 状态文件保留最近条数
@@ -579,6 +615,22 @@ def preview_push(items: list, note: str = None) -> bool:
              and it["title"].lower().strip() not in old_titles]
     print(f"Engine preview: {len(filtered)} filtered, {len(fresh)} new for test group "
           f"(tier1={stats['tier1']}, tier2={stats['tier2']})")
+
+    # US Policy 条目标题主题词校验：拦截引擎误评的全文匹配噪音（见 US_POLICY_PREVIEW_RE 注释）
+    kept, skipped_policy = [], 0
+    for it in fresh:
+        if it.get("source") == "US Policy" and not (
+                US_POLICY_PREVIEW_RE.search(it["title"])
+                or keyword_hit(it["title"])
+                or company_hit(it["title"])):
+            skipped_policy += 1
+            continue
+        kept.append(it)
+    if skipped_policy:
+        print(f"Engine preview: dropped {skipped_policy} US Policy noise item(s) "
+              f"(title lacks policy topic)")
+    fresh = kept
+
     if not fresh:
         print("Engine preview: no new items, skip push")
         # 2026-08-16 用户要求：测试群也推 idle 提示，避免静默无法判断链路状态
@@ -623,6 +675,7 @@ def dump_items(items: list, results: dict = None) -> None:
         for it in items:
             kw = keyword_hit(it["title"])
             co = company_hit(it["title"])
+            im = implicit_china_hit(it["title"])
             win = within_24h(it["published"])
             rec = {
                 "ts": ts,
@@ -632,8 +685,9 @@ def dump_items(items: list, results: dict = None) -> None:
                 "published": it["published"],
                 "keyword_hit": kw,
                 "company_hit": co,
+                "implicit_hit": im,
                 "within_24h": win,
-                "passed": (kw or co) and win,
+                "passed": (kw or co or im) and win,
             }
             if results is not None:
                 r = results.get(it["title"])
@@ -663,9 +717,10 @@ def _run(dump: bool = False, dump_only: bool = False, engine_preview: bool = Fal
         return 1
     print(f"Merged {len(items)} raw items (deduped)")
 
-    # 主链（原有链条不动）：布尔过滤 = 关键词子串 or 公司名词边界 + 24h
+    # 主链（原有链条不动）：布尔过滤 = 关键词子串 or 公司名词边界 or 美政策暗含中国产业影响 + 24h
     filtered = [it for it in items
-                if (keyword_hit(it["title"]) or company_hit(it["title"]))
+                if (keyword_hit(it["title"]) or company_hit(it["title"])
+                    or implicit_china_hit(it["title"]))
                 and within_24h(it["published"])]
     print(f"After filter: {len(filtered)} items")
 
