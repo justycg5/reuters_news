@@ -350,8 +350,13 @@ def webhook_url_test() -> str:
 
 
 def strip_source(title: str) -> str:
-    """清理 Google News 标题自带的来源后缀（Reuters / Bloomberg.com / Bloomberg LEI）。"""
-    return re.sub(r"\s*-\s*(?:Reuters(?: poll)?|Bloomberg(?:\.com| LEI)?)\s*$", "", title).strip()
+    """清理 Google News 标题自带的来源后缀（Reuters / Bloomberg 及其分站域名）。
+    2026-08-17 修复：加 IGNORECASE（Google 会返回小写 bloomberg.com/reuters 后缀），
+    并覆盖分站域名（jp.reuters.com / rmb.reuters.com / cn.bloomberg.com 等）。"""
+    return re.sub(
+        r"\s*-\s*(?:Reuters(?: poll)?|Bloomberg(?:\.com| LEI)?|(?:[\w-]+\.)*(?:reuters|bloomberg)\.com)\s*$",
+        "", title, flags=re.IGNORECASE
+    ).strip()
 
 
 def parse_rss(text: str) -> list:
