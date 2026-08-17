@@ -188,11 +188,17 @@ def company_hit(title: str) -> bool:
 # 实测：dump 2400+ 条中此类新闻约 4 条（drone tariffs 等），量小精准；
 # 产业词用词边界，避免子串误匹配（如 "ai " 撞 "Dubai"）。
 TOPIC_RE = re.compile(
-    r"\b(?:tariff\w*|sanction\w*|blacklist\w*|entity list\w*)\b"
+    r"\b(?:tariff\w*|sanction\w*|blacklist\w*|entity list\w*|covered list\w*)\b"
     # 进出口管制（2026-08-17 优化：原 "export control" 短语在真实标题中 0 命中，改为动词+对象变体）
     r"|\b(?:export|import)\w*\s+(?:curb\w*|ban\w*|restrict\w*|control\w*|limit\w*)\b"
     r"|\b(?:curb\w*|restrict\w*|ban\w*|limit\w*|block\w*|halt\w*|bar\w*|tighten\w*)"
-    r"\w*\s+(?:on\s+)?(?:export\w*|import\w*|shipment\w*|sale\w*|transfer\w*)\b",
+    r"\w*\s+(?:on\s+)?(?:export\w*|import\w*|shipment\w*|sale\w*|transfer\w*)\b"
+    # 关税 duty 变体（2026-08-17：duty→duties 不规则复数，用 dut(?:y|ies)；
+    # 仅收「修饰词+duty」形式，避免 "return to duty" 职责义误伤）
+    r"|\b(?:import|anti-?dumping|countervailing|customs)\s+dut(?:y|ies)\b"
+    # FCC 互认协议/覆盖清单（2026-08-17）："covered list" 为 FCC 官方术语（覆盖清单），
+    # "mutual recognition"/non-MRA 为互认协议措辞，不依赖标题是否点名中国
+    r"|\b(?:mutual recognition|non[- ]?mra)\b",
     re.IGNORECASE,
 )
 INDUSTRY_RE = re.compile(
@@ -216,11 +222,17 @@ def implicit_china_hit(title: str) -> bool:
 # 含 fed/federal reserve（Fed 货币政策属需求 3 明确列举）；
 # 不含产业词（如 chips），避免 "Watch Modi Puts Chips…" 这类误放行。
 US_POLICY_PREVIEW_RE = re.compile(
-    r"\b(?:tariff\w*|sanction\w*|blacklist\w*|entity list\w*|fed\b|federal reserve)\b"
+    r"\b(?:tariff\w*|sanction\w*|blacklist\w*|entity list\w*|covered list\w*|fed\b|federal reserve)\b"
     # 进出口管制（2026-08-17 优化：原 "export control" 短语 0 命中，改为动词+对象变体）
     r"|\b(?:export|import)\w*\s+(?:curb\w*|ban\w*|restrict\w*|control\w*|limit\w*)\b"
     r"|\b(?:curb\w*|restrict\w*|ban\w*|limit\w*|block\w*|halt\w*|bar\w*|tighten\w*)"
-    r"\w*\s+(?:on\s+)?(?:export\w*|import\w*|shipment\w*|sale\w*|transfer\w*)\b",
+    r"\w*\s+(?:on\s+)?(?:export\w*|import\w*|shipment\w*|sale\w*|transfer\w*)\b"
+    # 关税 duty 变体（2026-08-17：duty→duties 不规则复数，用 dut(?:y|ies)；
+    # 仅收「修饰词+duty」形式，避免 "return to duty" 职责义误伤）
+    r"|\b(?:import|anti-?dumping|countervailing|customs)\s+dut(?:y|ies)\b"
+    # FCC 互认协议/覆盖清单（2026-08-17）："covered list" 为 FCC 官方术语（覆盖清单），
+    # "mutual recognition"/non-MRA 为互认协议措辞，不依赖标题是否点名中国
+    r"|\b(?:mutual recognition|non[- ]?mra)\b",
     re.IGNORECASE,
 )
 # 矿产词表（2026-08-17 引入 Mining.com 矿产源）：预览链需求校验用，
