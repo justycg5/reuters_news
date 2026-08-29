@@ -214,7 +214,7 @@ def implicit_china_hit(title: str) -> bool:
     return bool(TOPIC_RE.search(title) and INDUSTRY_RE.search(title))
 
 
-# 预览链需求校验词表（2026-08-16 用户定案：三条需求校验只针对预览链）：
+# 辅助链需求校验词表（2026-08-16 用户定案：需求校验只针对辅助链；2026-08-29 验证期结束，"预览链/测试群"正式更名"辅助链/辅助群"）：
 # 需求 3（美国影响中国）的政策词。Google News RSS 为全文匹配，引擎会误评高分噪音
 # （"Zelenskyy Says Ukraine Strikes…"、"Peru's Economy…" 等标题无关条目，
 # 实测 US Policy 源 136 条中 16 条被误评 Tier1/2）。
@@ -235,7 +235,7 @@ US_POLICY_PREVIEW_RE = re.compile(
     r"|\b(?:mutual recognition|non[- ]?mra)\b",
     re.IGNORECASE,
 )
-# 矿产词表（2026-08-17 引入 Mining.com 矿产源）：预览链需求校验用，
+# 矿产词表（2026-08-17 引入 Mining.com 矿产源）：辅助链需求校验用，
 # 覆盖“世界重大矿产事件”（贵金属/工业金属/电池金属/稀土/关键矿产/煤炭）。
 # 词边界匹配，避开歧义词（lead=铅/领导、steel=钢铁成品均不收）。
 MINERAL_RE = re.compile(
@@ -245,8 +245,8 @@ MINERAL_RE = re.compile(
     r"|rare[- ]earth|iron ore|critical minerals?",
     re.IGNORECASE,
 )
-STATE_FILE = "last_sent.json"  # 正式链去重状态（原有）
-STATE_FILE_ENGINE = "last_sent_engine.json"  # 引擎预览链去重状态（独立，测试群验证用）
+STATE_FILE = "last_sent.json"  # 基础链（基础群）去重状态（原有）
+STATE_FILE_ENGINE = "last_sent_engine.json"  # 辅助链（辅助群）去重状态（独立）
 MAX_STATE = 200  # 状态文件保留最近条数
 DUMP_DIR = "data"  # --dump 原始数据落盘目录（jsonl，按天分文件）
 
@@ -300,8 +300,8 @@ def _build_webhook_url(v: str) -> str:
 
 
 def webhook_url(strict: bool = True) -> str:
-    """正式 webhook。strict=False 时（引擎预览模式）找不到 key 返回空串而非退出，
-    便于本地只验证预览通道。"""
+    """基础群 webhook。strict=False 时（引擎并行模式）找不到 key 返回空串而非退出，
+    便于本地只验证辅助通道。"""
     # 优先级 1: 本地调试文件 .env.local（不入 git，手动创建），格式:
     #   WECOM_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=***
     # 或 WECOM_WEBHOOK_KEY=***
@@ -330,9 +330,9 @@ def webhook_url(strict: bool = True) -> str:
 
 
 def webhook_url_test() -> str:
-    """测试 webhook（引擎预览验证通道，--engine-preview 用）。
+    """辅助群 webhook（引擎链验证通道，--engine-preview 用）。
     优先级：环境变量 WECOM_WEBHOOK_KEY_TEST（GitHub Actions Secret）> .env.local.test（本地）。
-    找不到返回空串（预览通道跳过，不影响正式链）。"""
+    找不到返回空串（辅助通道跳过，不影响基础链）。"""
     key = os.environ.get("WECOM_WEBHOOK_KEY_TEST", "").strip()
     if key:
         return _build_webhook_url(key)
@@ -640,15 +640,15 @@ def engine_filter(items: list, thresholds: dict = None) -> tuple:
 
 
 def preview_push(items: list, note: str = None) -> bool:
-    """预览通道（测试群）：引擎 Tier1/2 门槛 + 需求校验。
+    """辅助通道（辅助群）：引擎 Tier1/2 门槛 + 需求校验。
     2026-08-16 用户定案：
-      正式链 = 中国（大陆/香港/台湾/重要公司）发生的事（简单布尔）；
-      预览链 = 引擎评分 Tier1/2 通过，且标题满足需求校验
+      基础链 = 中国（大陆/香港/台湾/重要公司）发生的事（简单布尔）；
+      辅助链 = 引擎评分 Tier1/2 通过，且标题满足需求校验
         （需求2：中国词/公司名 OR 需求3：美政策词 OR 需求4：矿产词）；
         Mining.com 矿产专站条目绕过引擎门槛，直接需求校验。
-      预览链不一定包含正式链全部信息（引擎门槛独立判定）。
-    独立状态 last_sent_engine.json，失败只 WARN 不影响正式链。
-    无测试 key / 引擎未加载 / 无新条时静默跳过（不推 idle，避免刷屏测试群）。"""
+      辅助链不一定包含基础链全部信息（引擎门槛独立判定）。
+    独立状态 last_sent_engine.json，失败只 WARN 不影响基础链。
+    无辅助群 key / 引擎未加载 / 无新条时静默跳过（不推 idle，避免刷屏辅助群）。"""
     webhook = webhook_url_test()
     if not webhook:
         print("WARN: engine-preview skipped: no test webhook key "
@@ -683,7 +683,7 @@ def preview_push(items: list, note: str = None) -> bool:
 
     if not fresh:
         print("Engine preview: no new items, skip push")
-        # 2026-08-16 用户要求：测试群也推 idle 提示，避免静默无法判断链路状态
+        # 2026-08-16 用户要求：辅助群也推 idle 提示，避免静默无法判断链路状态
         if not push_idle(webhook, note="引擎预览"):
             print("WARN: engine-preview idle notice push failed")
         return True
@@ -767,8 +767,8 @@ def _run(dump: bool = False, dump_only: bool = False, engine_preview: bool = Fal
         return 1
     print(f"Merged {len(items)} raw items (deduped)")
 
-    # 主链（正式群）：简单布尔 = 关键词子串 or 公司名词边界 + 24h。
-    # 2026-08-16 起需求校验（含美政策/暗含产业影响）收敛到预览链，正式链保持高纯度：
+    # 基础链（基础群）：简单布尔 = 关键词子串 or 公司名词边界 + 24h。
+    # 2026-08-16 起需求校验（含美政策/暗含产业影响）收敛到辅助链，基础链保持高纯度：
     # 只推标题明确含中国词或中国公司名的新闻。
     filtered = [it for it in items
                 if (keyword_hit(it["title"]) or company_hit(it["title"]))
@@ -795,7 +795,7 @@ def _run(dump: bool = False, dump_only: bool = False, engine_preview: bool = Fal
              and it["title"].lower().strip() not in old_titles]
     print(f"New items: {len(fresh)}")
 
-    # 正式 webhook：preview 模式下允许缺失（本地只验预览通道时跳过正式链）
+    # 基础群 webhook：并行模式下允许缺失（本地只验辅助通道时跳过基础链）
     main_webhook = webhook_url(strict=not engine_preview)
     if not main_webhook:
         print("WARN: no formal webhook key; skip formal chain push (engine-preview mode)")
@@ -828,7 +828,7 @@ def _run(dump: bool = False, dump_only: bool = False, engine_preview: bool = Fal
                old_titles | {it["title"].lower().strip() for it in fresh})
     print(f"Pushed {len(fresh)} items to WeCom, state saved")
 
-    # 引擎预览验证通道（可选）：引擎过滤结果推测试 webhook，与正式链完全隔离
+    # 引擎辅助验证通道（可选）：引擎过滤结果推辅助群 webhook，与基础链完全隔离
     if engine_preview:
         preview_push(items, note=note)
 
@@ -842,7 +842,7 @@ def main() -> int:
     parser.add_argument("--dump-only", action="store_true",
                         help="只抓取 + 落盘，不推送（本机采集数据用，供阈值校准）")
     parser.add_argument("--engine-preview", action="store_true",
-                        help="并行验证：正式链维持布尔过滤推正式群，另将引擎过滤结果推测试群（独立去重）")
+                        help="并行双群：基础链布尔过滤推基础群，另将引擎过滤结果推辅助群（独立去重）")
     parser.add_argument("--us-policy", action="store_true",
                         help="启用美政策源查询组（Fed/关税/制裁/芯片/黑名单/出口管制，+12 查询，本地采集攒数据用）")
     args = parser.parse_args()
