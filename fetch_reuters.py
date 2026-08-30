@@ -245,6 +245,17 @@ MINERAL_RE = re.compile(
     r"|rare[- ]earth|iron ore|critical minerals?",
     re.IGNORECASE,
 )
+# 页面型标题过滤（2026-08-30 引入）：Google News 全文匹配会返回 Bloomberg 站内页面
+# （人物档案页/主题聚合页/行情页），标题含 China/Chinese/taiwan/gold 等词会混进推送候选。
+# 实测 dump 13,740 条中此类页面 55 条去重标题，全部非新闻，零误杀风险（短语均为页面专用措辞）。
+# 2026-08-30 先实施"Profile and Biography"（人物档案页，23 条）一类，其余三类（Trending News/
+# Top Headlines on/Spot Rate）观察后按需加入。
+PAGE_RE = re.compile(r"\bProfile and Biography\b", re.IGNORECASE)
+
+
+def is_profile_page(title: str) -> bool:
+    """标题是否为站内人物档案页等页面型标题（非新闻，直接拦）。"""
+    return bool(PAGE_RE.search(title))
 STATE_FILE = "last_sent.json"  # 基础链（基础群）去重状态（原有）
 STATE_FILE_ENGINE = "last_sent_engine.json"  # 辅助链（辅助群）去重状态（独立）
 MAX_STATE = 200  # 状态文件保留最近条数
@@ -670,12 +681,14 @@ def preview_push(items: list, note: str = None) -> bool:
     mining_extra = [it for it in fresh_items
                     if it["source"] == "Mining.com" and it["title"] not in filtered_titles]
     candidates = filtered + mining_extra
-    # 需求校验：需求2（中国词/公司名）OR 需求3（美政策词）OR 需求4（矿产词）
+    # 需求校验：需求2（中国词/公司名）OR 需求3（美政策词）OR 需求4（矿产词）；
+    # 2026-08-30 起页面型标题（人物档案页等）直接拦（非新闻）。
     fresh = [it for it in candidates
-             if (US_POLICY_PREVIEW_RE.search(it["title"])
+             if not is_profile_page(it["title"])
+             and ((US_POLICY_PREVIEW_RE.search(it["title"])
                   or MINERAL_RE.search(it["title"])
                   or keyword_hit(it["title"])
-                  or company_hit(it["title"]))
+                  or company_hit(it["title"])))
              and it["url"] not in old_urls
              and it["title"].lower().strip() not in old_titles]
     print(f"Engine preview: {len(filtered)} filtered (tier1={stats['tier1']} tier2={stats['tier2']}), "
@@ -767,11 +780,13 @@ def _run(dump: bool = False, dump_only: bool = False, engine_preview: bool = Fal
         return 1
     print(f"Merged {len(items)} raw items (deduped)")
 
-    # 基础链（基础群）：简单布尔 = 关键词子串 or 公司名词边界 + 24h。
+    # 基础链（基础群）：简单布尔 = 关键词子串 or 公司名词边界 + 24h；
+    # 2026-08-30 起页面型标题（人物档案页等，含 Chinese/taiwan 词的站内页面）直接拦。
     # 2026-08-16 起需求校验（含美政策/暗含产业影响）收敛到辅助链，基础链保持高纯度：
     # 只推标题明确含中国词或中国公司名的新闻。
     filtered = [it for it in items
-                if (keyword_hit(it["title"]) or company_hit(it["title"]))
+                if not is_profile_page(it["title"])
+                and (keyword_hit(it["title"]) or company_hit(it["title"]))
                 and within_24h(it["published"])]
     print(f"After filter: {len(filtered)} items")
 
