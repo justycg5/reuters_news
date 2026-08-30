@@ -166,8 +166,10 @@ COMPANY_NAMES = [
     "deepseek", "zhipu", "baichuan", "minimax", "xiaohongshu", "rednote",
     "wahaha", "state grid", "sinochem",
     # --- 其他知名/科技/制造 ---
+    # 2026-08-30 补充：TSMC（台湾公司口径已确认，中美芯片战核心标的；dump 实测 20 条真实新闻仅 1 条被覆盖，19 条漏报）
     "hikvision", "zte", "wuxi", "hua hong", "yangtze memory", "cxmt",
     "foxconn", "hon hai", "changan", "saic", "gwm", "chery", "xtep",
+    "tsmc", "taiwan semiconductor",
 ]
 
 _COMPANY_RE = re.compile(
